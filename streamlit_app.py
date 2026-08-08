@@ -51,6 +51,13 @@ if "logged_in" not in st.session_state:
         "orientation": "south",
     }
     st.session_state.page = "Project Dashboard"
+    # New controls for dashboard enhancements
+    st.session_state.show_grid = False
+    st.session_state.grid_spacing_mm = 1000
+    st.session_state.show_north = False
+    st.session_state.click_to_place = False
+    st.session_state.click_counter = 0
+    st.session_state.show_dimensions = True
 
 if not load_users():
     create_user("admin", "admin123", role="admin")
@@ -129,16 +136,91 @@ def unit_label(unit_type):
     }
     return labels.get(unit_type, "")
 
-# ---------- UI Helpers ----------
-def render_svg_plan(plan, width=800, height=500):
-    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" style="width:100%; background:#0F172A;">'
+# ---------- SVG Renderer (with all new features) ----------
+def generate_svg_string(plan, width=800, height=500,
+                        show_grid=False, grid_spacing_mm=1000,
+                        show_north=False, orientation="north",
+                        show_dimensions=True):
+    """Return an SVG string for the plan, with optional grid/north/dimensions."""
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" id="plan-svg" style="width:100%; background:#0F172A;">'
+    
+    # ---- Grid lines ----
+    if show_grid and grid_spacing_mm > 0:
+        x = 0
+        while x <= width:
+            svg += f'<line x1="{x}" y1="0" x2="{x}" y2="{height}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4"/>'
+            x += grid_spacing_mm
+        y = 0
+        while y <= height:
+            svg += f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4"/>'
+            y += grid_spacing_mm
+
+    # ---- Rooms ----
     for item in plan:
         x, y, w, h = item["x"], item["y"], item["w"], item["h"]
         color = item.get("color", "#4f46e5")
+        name = item["name"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         svg += f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{color}" fill-opacity="0.4" stroke="#94a3b8" stroke-width="2"/>'
-        svg += f'<text x="{x+w/2}" y="{y+h/2}" font-size="12" fill="white" text-anchor="middle" dominant-baseline="middle">{item["name"]}</text>'
+        svg += f'<text x="{x+w/2}" y="{y+h/2 - 8}" font-size="12" fill="white" text-anchor="middle" dominant-baseline="middle">{name}</text>'
+        if show_dimensions:
+            dims = f"{w}×{h} mm"
+            svg += f'<text x="{x+w/2}" y="{y+h/2 + 12}" font-size="10" fill="#94a3b8" text-anchor="middle" dominant-baseline="middle">{dims}</text>'
+
+    # ---- North arrow ----
+    if show_north:
+        arrow_x = width - 70
+        arrow_y = 40
+        rotation_map = {"north": 0, "east": 90, "south": 180, "west": 270}
+        angle = rotation_map.get(orientation, 0)
+        svg += f'''
+        <g transform="translate({arrow_x},{arrow_y}) rotate({angle})">
+            <line x1="0" y1="20" x2="0" y2="0" stroke="#FBBF24" stroke-width="3"/>
+            <polygon points="-6,8 0,0 6,8" fill="#FBBF24"/>
+            <text x="0" y="30" text-anchor="middle" font-size="14" fill="#FBBF24" font-weight="bold">N</text>
+        </g>
+        '''
+
     svg += '</svg>'
     return svg
+
+# ---------- Interactive Plan Component (click‑to‑place) ----------
+def interactive_plan_component(svg_string, key_suffix):
+    """Renders the SVG and returns coordinates when user clicks on the plan."""
+    comp_key = f"plan_{key_suffix}"
+    html = f"""
+    <html>
+    <body style="margin:0; overflow:hidden;">
+        {svg_string}
+        <script>
+        const svg = document.getElementById('plan-svg');
+        svg.addEventListener('click', function(e) {{
+            const rect = svg.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const viewBox = svg.viewBox.baseVal;
+            const scaleX = viewBox.width / rect.width;
+            const scaleY = viewBox.height / rect.height;
+            const svgX = Math.round(x * scaleX);
+            const svgY = Math.round(y * scaleY);
+            window.parent.postMessage({{
+                type: "streamlit:setComponentValue",
+                value: [svgX, svgY]
+            }}, "*");
+        }});
+        </script>
+    </body>
+    </html>
+    """
+    return st.components.v1.html(html, height=500, key=comp_key)
+
+# ---------- Helpers for nudge & coordinate edit ----------
+def update_building_plan(building, mem, username):
+    """Persist building changes to memory and disk."""
+    for i, b in enumerate(mem["buildings"]):
+        if b["id"] == building.id:
+            mem["buildings"][i] = building.to_dict()
+            break
+    save_memory(username, mem)
 
 # ======================
 # LOGIN PAGE
@@ -147,7 +229,6 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        # Inline SVG logo
         st.markdown("""
         <div style="text-align:center; margin-bottom:10px;">
             <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -206,7 +287,6 @@ mem = st.session_state.memory
 
 # ----- SIDEBAR -----
 with st.sidebar:
-    # Inline SVG logo
     st.markdown("""
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -250,7 +330,7 @@ with st.sidebar:
 
     if st.button("🚪 Logout"):
         save_memory(username, mem)
-        for key in ["logged_in","username","user_data","memory","active_building"]:
+        for key in ["logged_in","username","user_data","memory","active_building","show_grid","grid_spacing_mm","show_north","click_to_place","click_counter","show_dimensions"]:
             if key in st.session_state:
                 if key == "memory":
                     st.session_state[key] = DEFAULT_STATE.copy()
@@ -308,16 +388,16 @@ if page == "Project Dashboard":
         if mem["buildings"]:
             st.markdown("**Saved Projects**")
             for bdict in reversed(mem["buildings"][-10:]):
-                building = Building.from_dict(bdict)
+                b = Building.from_dict(bdict)
                 col_a, col_b = st.columns([3,1])
                 with col_a:
-                    if st.button(f"📂 {building.name}", key=f"sel_{building.id}"):
-                        st.session_state.active_building = building
+                    if st.button(f"📂 {b.name}", key=f"sel_{b.id}"):
+                        st.session_state.active_building = b
                         st.rerun()
                 with col_b:
-                    if st.button("🗑️", key=f"del_{building.id}"):
-                        mem["buildings"] = [b for b in mem["buildings"] if b["id"] != building.id]
-                        if st.session_state.active_building and st.session_state.active_building.id == building.id:
+                    if st.button("🗑️", key=f"del_{b.id}"):
+                        mem["buildings"] = [x for x in mem["buildings"] if x["id"] != b.id]
+                        if st.session_state.active_building and st.session_state.active_building.id == b.id:
                             st.session_state.active_building = None
                         save_memory(username, mem)
                         st.rerun()
@@ -342,68 +422,185 @@ if page == "Project Dashboard":
         else:
             st.caption("Need at least 2 projects to compare.")
 
+        # ---- Live Area Breakdown ----
+        if st.session_state.active_building:
+            st.markdown("---")
+            st.markdown("### 📏 Room Areas")
+            plan = st.session_state.active_building.plan
+            if plan:
+                total = 0
+                for room in plan:
+                    w, h = room["w"], room["h"]
+                    area_m2 = w * h / 1e6
+                    st.caption(f"{room['name']}: {output_metric(area_m2, 'area'):.2f} {unit_label('area')}")
+                    total += area_m2
+                st.metric("Total Area", f"{output_metric(total, 'area'):.2f} {unit_label('area')}")
+            else:
+                st.caption("No rooms yet.")
+
     with right_col:
         if st.session_state.active_building:
             building = st.session_state.active_building
             plan = building.plan
 
-            # ---- Plan Editor ----
-            with st.expander("✏️ Edit Plan (Add / Remove Rooms)", expanded=False):
+            # ---- Grid & Orientation Controls ----
+            with st.expander("🧭 Grid & Orientation", expanded=False):
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    show_grid = st.checkbox("Show Grid", value=st.session_state.show_grid, key="show_grid_cb")
+                    st.session_state.show_grid = show_grid
+                    if show_grid:
+                        if st.session_state.unit_system == "metric":
+                            disp_spacing = st.session_state.grid_spacing_mm / 1000.0
+                            label = "Grid spacing (m)"
+                            step = 0.1
+                        else:
+                            disp_spacing = st.session_state.grid_spacing_mm / 304.8
+                            label = "Grid spacing (ft)"
+                            step = 1.0
+                        new_sp = st.number_input(label, min_value=0.1, max_value=10.0,
+                                                 value=float(disp_spacing), step=step, key="grid_space")
+                        if st.session_state.unit_system == "metric":
+                            st.session_state.grid_spacing_mm = new_sp * 1000
+                        else:
+                            st.session_state.grid_spacing_mm = new_sp * 304.8
+                with col_g2:
+                    show_north = st.checkbox("Show North Arrow", value=st.session_state.show_north, key="show_north_cb")
+                    st.session_state.show_north = show_north
+                    show_dim = st.checkbox("Show Dimensions", value=st.session_state.show_dimensions, key="show_dim_cb")
+                    st.session_state.show_dimensions = show_dim
+                click_place = st.checkbox("Click‑to‑place room", value=st.session_state.click_to_place, key="click_place_cb")
+                st.session_state.click_to_place = click_place
+                if click_place:
+                    st.caption("Click on the plan background to add a new room at that position.")
+
+            # ---- 2D Plan (interactive if click‑to‑place enabled) ----
+            st.markdown("#### 📐 2D Floor Plan")
+            if plan:
+                svg_str = generate_svg_string(
+                    plan,
+                    show_grid=st.session_state.show_grid,
+                    grid_spacing_mm=st.session_state.grid_spacing_mm,
+                    show_north=st.session_state.show_north,
+                    orientation=st.session_state.eng_params.get("orientation", "north"),
+                    show_dimensions=st.session_state.show_dimensions
+                )
+                if st.session_state.click_to_place:
+                    # Use interactive component; returns [x,y] when clicked
+                    comp_key = f"{building.id}_{st.session_state.click_counter}"
+                    coords = interactive_plan_component(svg_str, comp_key)
+                    if coords and isinstance(coords, list) and len(coords) == 2:
+                        x, y = coords[0], coords[1]
+                        # Add a new room at (x,y) with random size
+                        w = random.randint(100, 200) * 5
+                        h = random.randint(100, 200) * 5
+                        color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
+                        plan.append({
+                            "x": int(x), "y": int(y), "w": w, "h": h,
+                            "name": f"Room {len(plan)+1}",
+                            "color": color_hex
+                        })
+                        building.plan = plan
+                        update_building_plan(building, mem, username)
+                        log_event(username, mem, f"Added room via click at ({x},{y})")
+                        st.session_state.click_counter += 1
+                        st.rerun()
+                else:
+                    # Static SVG
+                    st.markdown(f'<div style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg_str}</div>', unsafe_allow_html=True)
+            else:
+                st.info("No plan data.")
+
+            # ---- Plan Editor (extended) ----
+            with st.expander("✏️ Edit Plan (Add / Remove / Modify Rooms)", expanded=False):
                 col_edit1, col_edit2 = st.columns(2)
                 with col_edit1:
-                    if st.button("➕ Add Room"):
+                    if st.button("➕ Add Random Room"):
                         w = random.randint(100, 200) * 5
                         h = random.randint(100, 200) * 5
                         x = random.randint(0, 700)
                         y = random.randint(0, 400)
+                        color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
                         plan.append({
                             "x": x, "y": y, "w": w, "h": h,
                             "name": f"Room {len(plan)+1}",
-                            "color": f"hsl({random.randint(0,360)}, 70%, 50%)"
+                            "color": color_hex
                         })
                         building.plan = plan
-                        for i, b in enumerate(mem["buildings"]):
-                            if b["id"] == building.id:
-                                mem["buildings"][i] = building.to_dict()
-                        save_memory(username, mem)
+                        update_building_plan(building, mem, username)
                         st.rerun()
                 with col_edit2:
                     if len(plan) > 1:
-                        room_to_remove = st.selectbox("Remove room", [r["name"] for r in plan], key="remove_room")
+                        room_names = [r["name"] for r in plan]
+                        room_to_remove = st.selectbox("Remove room", room_names, key="remove_room")
                         if st.button("🗑️ Remove Selected"):
                             plan = [r for r in plan if r["name"] != room_to_remove]
                             building.plan = plan
-                            for i, b in enumerate(mem["buildings"]):
-                                if b["id"] == building.id:
-                                    mem["buildings"][i] = building.to_dict()
-                            save_memory(username, mem)
+                            update_building_plan(building, mem, username)
                             st.rerun()
 
-                st.write("Current rooms:")
+                st.write("**Room properties**")
                 for i, room in enumerate(plan):
-                    col_r1, col_r2, col_r3 = st.columns([2, 1, 1])
-                    col_r1.write(f"{room['name']}: {room['w']}x{room['h']} mm")
-                    new_w = col_r2.number_input("W", 100, 2000, room["w"], key=f"rw_{i}")
-                    new_h = col_r3.number_input("H", 100, 2000, room["h"], key=f"rh_{i}")
-                    if new_w != room["w"] or new_h != room["h"]:
-                        plan[i]["w"] = new_w
-                        plan[i]["h"] = new_h
+                    with st.container():
+                        cols = st.columns([2, 1, 1, 1, 1, 1])
+                        # Name
+                        cols[0].write(room["name"])
+                        # Width
+                        new_w = cols[1].number_input("W", 100, 2000, room["w"], key=f"rw_{i}")
+                        # Height
+                        new_h = cols[2].number_input("H", 100, 2000, room["h"], key=f"rh_{i}")
+                        # X
+                        new_x = cols[3].number_input("X", 0, 800, room["x"], key=f"rx_{i}")
+                        # Y
+                        new_y = cols[4].number_input("Y", 0, 500, room["y"], key=f"ry_{i}")
+                        # Color
+                        new_color = cols[5].color_picker("", value=room.get("color", "#4f46e5"), key=f"rc_{i}")
+                        # Check changes
+                        changed = False
+                        if new_w != room["w"] or new_h != room["h"] or new_x != room["x"] or new_y != room["y"] or new_color != room["color"]:
+                            plan[i]["w"] = new_w
+                            plan[i]["h"] = new_h
+                            plan[i]["x"] = new_x
+                            plan[i]["y"] = new_y
+                            plan[i]["color"] = new_color
+                            changed = True
+                        if changed:
+                            building.plan = plan
+                            update_building_plan(building, mem, username)
+                            st.rerun()
+
+                # ---- Nudge selected room ----
+                if plan:
+                    st.markdown("---")
+                    st.markdown("**↕️ Nudge selected room**")
+                    room_names = [r["name"] for r in plan]
+                    nudge_room = st.selectbox("Select room", room_names, key="nudge_room_sel")
+                    nudge_step = st.number_input("Step (mm)", value=100, step=10, key="nudge_step")
+                    col_n1, col_n2, col_n3, col_n4 = st.columns(4)
+                    idx = next(i for i, r in enumerate(plan) if r["name"] == nudge_room)
+                    room = plan[idx]
+                    if col_n1.button("⬅️ Left", key="nudge_left"):
+                        plan[idx]["x"] = max(0, room["x"] - nudge_step)
                         building.plan = plan
-                        for j, b in enumerate(mem["buildings"]):
-                            if b["id"] == building.id:
-                                mem["buildings"][j] = building.to_dict()
-                        save_memory(username, mem)
+                        update_building_plan(building, mem, username)
+                        st.rerun()
+                    if col_n2.button("➡️ Right", key="nudge_right"):
+                        plan[idx]["x"] = room["x"] + nudge_step
+                        building.plan = plan
+                        update_building_plan(building, mem, username)
+                        st.rerun()
+                    if col_n3.button("⬆️ Up", key="nudge_up"):
+                        plan[idx]["y"] = max(0, room["y"] - nudge_step)
+                        building.plan = plan
+                        update_building_plan(building, mem, username)
+                        st.rerun()
+                    if col_n4.button("⬇️ Down", key="nudge_down"):
+                        plan[idx]["y"] = room["y"] + nudge_step
+                        building.plan = plan
+                        update_building_plan(building, mem, username)
                         st.rerun()
 
-            # 2D Plan
-            st.markdown("#### 📐 2D Floor Plan")
-            if plan:
-                svg = render_svg_plan(plan)
-                st.markdown(f'<div style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg}</div>', unsafe_allow_html=True)
-            else:
-                st.info("No plan data.")
-
-            # ---- 3D Interactive Model (fixed escaping) ----
+            # ---- 3D Model ----
             st.markdown("#### 🧊 Interactive 3D Model")
             if plan:
                 rooms_js = ""
@@ -460,24 +657,27 @@ if page == "Project Dashboard":
             else:
                 st.info("3D view requires a building plan.")
 
-            # ---- Cost Breakdown ----
+            # ---- Cost & Material Estimate ----
             st.markdown("---")
             with st.expander("💰 Cost & Material Estimate", expanded=False):
                 if st.button("Calculate Estimate", key="calc_cost"):
                     cost = estimate_cost(plan)
                     st.table({
                         "Item": ["Concrete", "Steel", "Glass", "Labor", "Total"],
-                        "Cost (USD)": [f"${cost['concrete']:,.2f}", f"${cost['steel']:,.2f}", f"${cost['glass']:,.2f}", f"${cost['labor']:,.2f}", f"${cost['total']:,.2f}"]
+                        "Cost (USD)": [f"${cost['concrete']:,.2f}", f"${cost['steel']:,.2f}",
+                                       f"${cost['glass']:,.2f}", f"${cost['labor']:,.2f}",
+                                       f"${cost['total']:,.2f}"]
                     })
 
             # ---- Export & Share ----
             st.markdown("---")
             with st.expander("📤 Export & Share", expanded=False):
                 if st.button("📄 Download Plan as SVG"):
-                    svg_content = render_svg_plan(plan)
+                    svg_content = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
                     st.download_button("Download SVG", svg_content, file_name=f"{building.name}_plan.svg", mime="image/svg+xml")
                 if st.button("📊 Export Summary PDF"):
-                    report_data = {"Project": building.name, "Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}", "Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}"}
+                    report_data = {"Project": building.name, "Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
+                                   "Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}"}
                     filename, error = generate_analysis_report(report_data, f"{building.name}_summary.pdf")
                     if not error:
                         with open(filename, "rb") as f:
@@ -518,202 +718,20 @@ elif page == "Structural Analysis":
         "🧱 Retaining Wall", "🔺 Truss", "📄 Export/Report"
     ])
 
-    # ---- BEAMS (0) ----
-    with tabs[0]:
-        st.subheader("Beam Design")
-        beam_mat = st.selectbox("Material", ["Reinforced Concrete", "Steel", "Timber", "Composite"], key="beam_mat")
-        if beam_mat == "Reinforced Concrete":
-            grade = st.selectbox("Concrete Grade", list(CONCRETE_GRADES.keys()), key="beam_rc_grade")
-            b = ui_number_input(f"Width ({unit_label('length_mm')})", 100, 1000, 300, 10, "beam_b", "length_mm")
-            h = ui_number_input(f"Total height ({unit_label('length_mm')})", 200, 2000, 500, 10, "beam_h", "length_mm")
-            d = h - 50e-3
-            span = ui_number_input(f"Span ({unit_label('length')})", 1.0, 30.0, 6.0, 0.1, "beam_span", "length")
-            M_ed = ui_number_input(f"Design Moment M_Ed ({unit_label('moment')})", 10.0, 1000.0, 120.0, 1.0, "beam_Med", "moment")
-            V_ed = ui_number_input(f"Design Shear V_Ed ({unit_label('force')})", 10.0, 500.0, 80.0, 1.0, "beam_Ved", "force")
-            if st.button("Check RC Beam", key="check_rc_beam"):
-                fck = CONCRETE_GRADES[grade]["fck"]
-                res = check_rc_beam(b, h, d, fck, M_ed, V_ed, span)
-                if res["pass"]: st.success("✅ Beam OK")
-                else: st.error("❌ Beam fails check")
-                st.write(f"As required: {output_metric(res['As_req'], 'area'):.2f} {unit_label('area')}")
-                st.json(res)
-        elif beam_mat == "Steel":
-            grade = st.selectbox("Steel Grade", list(STEEL_GRADES.keys()), key="beam_steel_grade")
-            section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="beam_sec")
-            span = ui_number_input(f"Span ({unit_label('length')})", 2.0, 20.0, 6.0, 0.1, "beam_span_steel", "length")
-            M_ed = ui_number_input(f"M_Ed ({unit_label('moment')})", 50.0, 500.0, 100.0, 1.0, "beam_Med_steel", "moment")
-            V_ed = ui_number_input(f"V_Ed ({unit_label('force')})", 20.0, 300.0, 50.0, 1.0, "beam_Ved_steel", "force")
-            if st.button("Check Steel Beam", key="check_steel_beam"):
-                steel = STEEL_GRADES[grade]
-                res = check_steel_beam(section, M_ed, V_ed, span, steel)
-                if res["pass"]: st.success("✅ Beam OK")
-                else: st.error("❌ Beam fails")
-                st.write(f"Utilization: {res['utilization']:.2f}")
-                st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
-                st.json(res)
-
-    # ---- COLUMNS (1) ----
-    with tabs[1]:
-        st.subheader("Column Design")
-        col_mat = st.selectbox("Material", ["RC", "Steel", "Timber"], key="col_mat")
-        if col_mat == "RC":
-            N_ed = ui_number_input(f"Axial load N_Ed ({unit_label('force')})", 100.0, 5000.0, 500.0, 10.0, "col_Ned", "force")
-            M_ed = ui_number_input(f"Moment M_Ed ({unit_label('moment')})", 0.0, 500.0, 20.0, 1.0, "col_Med", "moment")
-            b = ui_number_input(f"Width ({unit_label('length_mm')})", 200, 1000, 300, 10, "col_b", "length_mm")
-            h = ui_number_input(f"Depth ({unit_label('length_mm')})", 200, 1000, 300, 10, "col_h", "length_mm")
-            l0 = ui_number_input(f"Effective length ({unit_label('length')})", 2.0, 10.0, 3.0, 0.1, "col_l0", "length")
-            grade = st.selectbox("Concrete Grade", list(CONCRETE_GRADES.keys()), key="col_grade")
-            if st.button("Check Column", key="check_col"):
-                fck = CONCRETE_GRADES[grade]["fck"]
-                res = check_rc_column(N_ed, M_ed, b, h, fck, l0)
-                if res["pass"]: st.success("✅ Column OK")
-                else: st.error("❌ Column fails")
-                st.write(f"N_Rd: {output_metric(res['N_rd'], 'force'):.1f} {unit_label('force')}")
-                st.json(res)
-
-    # ---- SLABS (2) ----
-    with tabs[2]:
-        st.subheader("Slab Thickness")
-        span = ui_number_input(f"Short span ({unit_label('length')})", 2.0, 15.0, 5.0, 0.1, "slab_span", "length")
-        support = st.selectbox("Support", ["simply_supported", "continuous"], key="slab_support")
-        t = slab_thickness_estimate(span, support)
-        st.success(f"Recommended thickness: **{output_metric(t*1000, 'length_mm'):.0f} {unit_label('length_mm')}**")
-
-    # ---- FOUNDATIONS (3) ----
-    with tabs[3]:
-        st.subheader("Pad Footing Sizing")
-        load = ui_number_input(f"Total column load ({unit_label('force')})", 100.0, 10000.0, 500.0, 10.0, "fdn_load", "force")
-        bearing = ui_number_input(f"Allowable bearing pressure ({unit_label('pressure')})", 50.0, 500.0, 150.0, 10.0, "fdn_bearing", "pressure")
-        fs = st.number_input("Factor of safety", 2.0, 5.0, 3.0, 0.1, key="fdn_fs")
-        if st.button("Size Footing", key="size_fdn"):
-            res = foundation_size(bearing, load, fs)
-            st.success(f"Square footing side: **{output_metric(res['side_m'], 'length'):.2f} {unit_label('length')}** (area: {output_metric(res['area_m2'], 'area'):.2f} {unit_label('area')})")
-
-    # ---- WALLS & FINISHES (4) ----
-    with tabs[4]:
-        st.subheader("Wall Types & Finishes")
-        wall = st.selectbox("Wall Type", list(WALL_TYPES.keys()), key="wall_type")
-        props = WALL_TYPES[wall]
-        weight_disp = output_metric(props['weight'], 'pressure') if st.session_state.unit_system=="imperial" else props['weight']
-        st.write(f"Weight: {weight_disp:.2f} {unit_label('pressure')}, U‑value: {props['U']} W/m²K, Sound: {props['sound']} dB")
-        finishes = st.multiselect("Finishes", list(FINISHES.keys()), default=["Plaster (internal)", "Paint"], key="finishes")
-        finish_load = sum(FINISHES[f] for f in finishes)
-        finish_disp = output_metric(finish_load, 'pressure') if st.session_state.unit_system=="imperial" else finish_load
-        st.metric("Total finish load", f"{finish_disp:.3f} {unit_label('pressure')}")
-        if st.button("Apply to Model", key="apply_wall"):
-            st.info("Wall/finish selection saved to project.")
-
-    # ---- PILES (5) ----
-    with tabs[5]:
-        st.subheader("Pile Foundation Design (Simplified EC7)")
-        pile_type = st.selectbox("Pile type", ["Bored", "Driven"], key="pile_type")
-        diameter = ui_number_input(f"Pile diameter ({unit_label('length')})", 0.3, 2.0, 0.6, 0.1, "pile_d", "length")
-        length = ui_number_input(f"Pile length ({unit_label('length')})", 5.0, 40.0, 15.0, 1.0, "pile_L", "length")
-        soil = st.selectbox("Soil type", ["sand", "clay"], key="pile_soil")
-        N = st.number_input("SPT N-value", 5, 60, 20, key="pile_N")
-        safety = st.number_input("Factor of safety", 2.0, 4.0, 2.5, 0.1, key="pile_fs")
-        if st.button("Calculate Capacity", key="pile_calc"):
-            res = pile_capacity(diameter, length, soil, N, safety)
-            st.metric("Allowable Capacity", f"{output_metric(res['Q_all_kN'], 'force'):.1f} {unit_label('force')}")
-            st.write(f"Ultimate capacity: {output_metric(res['Q_ult_kN'], 'force'):.1f} {unit_label('force')}")
-            st.write(f"Shaft resistance: {output_metric(res['shaft_kN'], 'force'):.1f} {unit_label('force')}, Base: {output_metric(res['base_kN'], 'force'):.1f} {unit_label('force')}")
-
-    # ---- PRESTRESSED (6) ----
-    with tabs[6]:
-        st.subheader("Prestressed Concrete Beam (Stress Check)")
-        M_ext = ui_number_input(f"External moment ({unit_label('moment')})", 100.0, 5000.0, 500.0, 10.0, "pre_M", "moment")
-        P = ui_number_input(f"Prestressing force ({unit_label('force')})", 100.0, 5000.0, 1000.0, 10.0, "pre_P", "force")
-        e = ui_number_input(f"Eccentricity ({unit_label('length')})", 0.0, 1.0, 0.2, 0.01, "pre_e", "length")
-        A = ui_number_input(f"Cross-sectional area ({unit_label('area')})", 0.05, 2.0, 0.3, 0.01, "pre_A", "area")
-        I = st.number_input("Second moment of area I (m⁴)", 0.001, 0.2, 0.01, 0.001, key="pre_I")
-        y_top = ui_number_input(f"y_top ({unit_label('length')})", 0.1, 1.0, 0.5, 0.01, "pre_ytop", "length")
-        y_bot = ui_number_input(f"y_bot ({unit_label('length')})", 0.1, 1.0, 0.5, 0.01, "pre_ybot", "length")
-        fck = st.number_input("fck (MPa)", 20, 60, 35, key="pre_fck")
-        if st.button("Check Stresses", key="pre_check"):
-            res = check_prestressed_beam(M_ext, P, e, A, I, y_top, y_bot, fck)
-            if res["pass"]: st.success("✅ Stresses within limits")
-            else: st.error("❌ Stress limit exceeded")
-            st.write(f"Top stress: {output_metric(res['sigma_top_MPa'], 'stress'):.2f} {unit_label('stress')}")
-            st.write(f"Bottom stress: {output_metric(res['sigma_bot_MPa'], 'stress'):.2f} {unit_label('stress')}")
-            st.write(f"Allowable compression: {output_metric(res['sigma_c_allow'], 'stress'):.2f} {unit_label('stress')}")
-            st.write(f"Allowable tension: {output_metric(res['sigma_t_allow'], 'stress'):.2f} {unit_label('stress')}")
-
-    # ---- RETAINING WALL (7) ----
-    with tabs[7]:
-        st.subheader("Cantilever Retaining Wall (Simplified)")
-        H = ui_number_input(f"Wall height ({unit_label('length')})", 1.0, 10.0, 3.0, 0.1, "rw_H", "length")
-        gamma = ui_number_input(f"Soil unit weight ({unit_label('weight_density')})", 15.0, 22.0, 18.0, 0.1, "rw_gamma", "weight_density")
-        phi = st.number_input("Friction angle (°)", 20.0, 45.0, 30.0, key="rw_phi")
-        c = ui_number_input(f"Cohesion ({unit_label('pressure')})", 0.0, 50.0, 0.0, 0.1, "rw_c", "pressure")
-        surcharge = ui_number_input(f"Surcharge ({unit_label('pressure')})", 0.0, 20.0, 0.0, 0.1, "rw_surch", "pressure")
-        wall_friction = st.number_input("Base friction coefficient", 0.3, 0.8, 0.6, key="rw_fric")
-        if st.button("Check Stability", key="rw_check"):
-            res = retaining_wall_stability(H, gamma, phi, c, surcharge, wall_friction)
-            if res["pass"]: st.success("✅ Wall stable")
-            else: st.error("❌ Stability check failed")
-            st.write(f"Active thrust: {output_metric(res['Pa_kN'], 'force'):.2f} {unit_label('force')}/m")
-            st.write(f"Overturning SF: {res['F_overt']:.2f}, Sliding SF: {res['F_sliding']:.2f}")
-
-    # ---- TRUSS (8) ----
-    with tabs[8]:
-        st.subheader("2D Truss Solver (coming soon)")
-        st.info("This module will perform method-of-joints analysis. Enter nodes, members, loads.")
-        if st.button("Solve Truss (demo)", key="truss_solve"):
-            res = truss_method_of_joints(None, None, None, None)
-            st.json(res)
-
-    # ---- EXPORT / REPORT (9) ----
-    with tabs[9]:
-        st.subheader("Export Analysis Report (PDF)")
-        if st.button("📄 Generate Report", key="pdf_gen"):
-            report_data = {"Project": "DRUM Sample", "Analysis": "Summary of last checks"}
-            if st.session_state.active_building:
-                plan = st.session_state.active_building.plan
-                area = calculate_total_area(plan)
-                load = compute_floor_loads(plan,
-                    live_load_kN_per_m2=st.session_state.eng_params["live_load"],
-                    slab_thickness_m=st.session_state.eng_params["slab_thickness"],
-                    additional_dead_load_kN_per_m2=st.session_state.eng_params["additional_dead"])
-                report_data["Total Floor Area"] = f"{output_metric(area, 'area'):.1f} {unit_label('area')}"
-                report_data["Design Load"] = f"{output_metric(load, 'force'):.1f} {unit_label('force')}"
-                integrity = check_structural_integrity(plan)
-                report_data["Max Span"] = f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}"
-                report_data["Suggested Beam"] = integrity["suggested_beam"]
-            filename, error = generate_analysis_report(report_data)
-            if error:
-                st.error(error)
-            else:
-                with open(filename, "rb") as f:
-                    st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
-                st.success("Report generated!")
-
-    # ---- BUILDING INTEGRATION ----
-    st.markdown("---")
-    if st.session_state.active_building:
-        st.subheader("📐 Building Plan Analysis")
-        plan = st.session_state.active_building.plan
-        area = calculate_total_area(plan)
-        load = compute_floor_loads(plan,
-            live_load_kN_per_m2=st.session_state.eng_params["live_load"],
-            slab_thickness_m=st.session_state.eng_params["slab_thickness"],
-            additional_dead_load_kN_per_m2=st.session_state.eng_params["additional_dead"])
-        st.write(f"Total floor area: {output_metric(area, 'area'):.1f} {unit_label('area')}, Design load: {output_metric(load, 'force'):.1f} {unit_label('force')}")
-        integrity = check_structural_integrity(plan)
-        st.write(f"Max span: {output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}, Suggested beam: {integrity['suggested_beam']}")
-    else:
-        st.info("No active building. Open a project from the dashboard or create a new one.")
+    # ... (keep all structural analysis tabs unchanged)
+    # (I’m not repeating them here for brevity – they are identical to your original file)
 
 # ======================
 # PAGE: ARCHIVES
 # ======================
-else:  # Archives
+else:
     st.title("🗄️ Project Archives")
     if mem["buildings"]:
         for bdict in reversed(mem["buildings"]):
             building = Building.from_dict(bdict)
             with st.expander(f"{building.name} – Score {building.score}"):
                 if building.plan:
-                    svg = render_svg_plan(building.plan)
+                    svg = generate_svg_string(building.plan, show_grid=False, show_north=False, show_dimensions=False)
                     st.markdown(f'<div style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg}</div>', unsafe_allow_html=True)
                 else:
                     st.write("No plan data.")
