@@ -7,7 +7,6 @@ from pages.project_dashboard import render_project_dashboard
 from pages.structural_analysis import render_structural_analysis
 from pages.archives import render_archives
 
-# ---------- Page Config ----------
 st.set_page_config(page_title="DRUM Studio", page_icon="🏗️", layout="wide",
                    initial_sidebar_state="expanded",
                    menu_items={"Get Help": None, "Report a bug": None, "About": None})
@@ -34,13 +33,13 @@ if "logged_in" not in st.session_state:
         "orientation": "south",
     }
     st.session_state.page = "Project Dashboard"
+    st.session_state.grid_spacing_mm = 1000    # default grid spacing
 
-# Create default admin if no users exist, using env vars or fallback
+# Create admin user if none exist
 if not load_users():
     admin_user = os.environ.get("DRUM_ADMIN_USER", "admin")
     admin_pass = os.environ.get("DRUM_ADMIN_PASS", None)
     if admin_pass is None:
-        # Fallback only for local dev; in production always set env var
         admin_pass = "admin123"
         print("WARNING: Using default admin password. Set DRUM_ADMIN_PASS env variable.")
     create_user(admin_user, admin_pass, role="admin")
@@ -50,7 +49,6 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        # Inline SVG logo
         st.markdown("""
         <div style="text-align:center; margin-bottom:10px;">
             <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -100,12 +98,11 @@ if not st.session_state.logged_in:
                         st.error(str(e))
     st.stop()
 
-# ---------- Sidebar (shared) ----------
+# ---------- Sidebar ----------
 username = st.session_state.username
 mem = st.session_state.memory
 
 with st.sidebar:
-    # Logo
     st.markdown("""
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
