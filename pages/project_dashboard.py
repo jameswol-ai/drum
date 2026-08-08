@@ -143,10 +143,99 @@ def render_project_dashboard():
                         st.rerun()
 
             # 2D Plan
-            st.markdown("#### 📐 2D Floor Plan")
-            if plan:
-                svg = render_svg_plan(plan)
-                st.markdown(f'<div style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg}</div>', unsafe_allow_html=True)
+            # 2D Plan with Grid & Orientation Controls
+st.markdown("#### 📐 2D Floor Plan")
+
+# --- Grid & Orientation Controls ---
+with st.expander("🧭 Grid & Orientation", expanded=False):
+    col_grid1, col_grid2 = st.columns(2)
+    with col_grid1:
+        show_grid = st.checkbox("Show Grid", value=False, key="show_grid")
+        if show_grid:
+            # Grid spacing input in user's unit system
+            # Convert from displayed unit to mm internally
+            if st.session_state.unit_system == "metric":
+                grid_label = "Grid spacing (m)"
+                step = 0.1
+                display_spacing = grid_spacing_mm / 1000.0   # m
+            else:
+                grid_label = "Grid spacing (ft)"
+                step = 1.0
+                display_spacing = grid_spacing_mm / 304.8    # ft
+            new_spacing = st.number_input(grid_label, min_value=0.1, max_value=10.0,
+                                          value=float(display_spacing), step=step, key="grid_space")
+            # Convert back to mm
+            if st.session_state.unit_system == "metric":
+                grid_spacing_mm = new_spacing * 1000
+            else:
+                grid_spacing_mm = new_spacing * 304.8
+            st.session_state.grid_spacing_mm = grid_spacing_mm
+    with col_grid2:
+        show_north = st.checkbox("Show North Arrow", value=False, key="show_north")
+
+if plan:
+    # Use the new grid-aware SVG renderer
+    svg = render_svg_plan_with_grid(
+        plan,
+        show_grid=show_grid,
+        grid_spacing_mm=st.session_state.get("grid_spacing_mm", 1000),
+        show_north=show_north,
+        orientation=st.session_state.eng_params.get("orientation", "north")
+    )
+    st.markdown(f'<div style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg}</div>', unsafe_allow_html=True)
+else:
+    st.info("No plan data.")
+
+# --- Room Nudge (move selected room with buttons) ---
+if plan:
+    with st.expander("↕️ Nudge Room Position", expanded=False):
+        room_names = [r["name"] for r in plan]
+        selected_room = st.selectbox("Select room to nudge", room_names, key="nudge_room")
+        if selected_room:
+            # Find the room index
+            room_idx = next(i for i, r in enumerate(plan) if r["name"] == selected_room)
+            room = plan[room_idx]
+            nudge_step = st.number_input("Nudge step (mm)", value=100, step=10, key="nudge_step")
+
+            col_n1, col_n2, col_n3, col_n4 = st.columns(4)
+            with col_n1:
+                if st.button("⬅️ Left", key="nudge_left"):
+                    plan[room_idx]["x"] = max(0, room["x"] - nudge_step)
+                    # save changes back
+                    building.plan = plan
+                    for i, b in enumerate(mem["buildings"]):
+                        if b["id"] == building.id:
+                            mem["buildings"][i] = building.to_dict()
+                    save_memory(st.session_state.username, mem)
+                    st.rerun()
+            with col_n2:
+                if st.button("➡️ Right", key="nudge_right"):
+                    plan[room_idx]["x"] = room["x"] + nudge_step
+                    building.plan = plan
+                    for i, b in enumerate(mem["buildings"]):
+                        if b["id"] == building.id:
+                            mem["buildings"][i] = building.to_dict()
+                    save_memory(st.session_state.username, mem)
+                    st.rerun()
+            with col_n3:
+                if st.button("⬆️ Up", key="nudge_up"):
+                    plan[room_idx]["y"] = max(0, room["y"] - nudge_step)
+                    building.plan = plan
+                    for i, b in enumerate(mem["buildings"]):
+                        if b["id"] == building.id:
+                            mem["buildings"][i] = building.to_dict()
+                    save_memory(st.session_state.username, mem)
+                    st.rerun()
+            with col_n4:
+                if st.button("⬇️ Down", key="nudge_down"):
+                    plan[room_idx]["y"] = room["y"] + nudge_step
+                    building.plan = plan
+                    for i, b in enumerate(mem["buildings"]):
+                        if b["id"] == building.id:
+                            mem["buildings"][i] = building.to_dict()
+                    save_memory(st.session_state.username, mem)
+                    st.rerun()
+            st.caption(f"Current position: x={room['x']} mm, y={room['y']} mm") style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg}</div>', unsafe_allow_html=True)
             else:
                 st.info("No plan data.")
 
