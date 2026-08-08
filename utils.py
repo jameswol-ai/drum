@@ -1,11 +1,15 @@
+# utils.py
 import streamlit as st
+import json
 
-# ---------- CSS ----------
 def inject_css():
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-    html, body, .stApp { font-family: 'Inter', sans-serif; background: #0F172A; color: #E2E8F0; }
+    html, body, .stApp {
+        font-family: 'Inter', sans-serif;
+        background: #0F172A; color: #E2E8F0;
+    }
     h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     .sidebar .sidebar-content { background: #1E293B; }
     .stButton>button {
@@ -15,14 +19,18 @@ def inject_css():
     }
     .stButton>button:hover { transform: scale(1.02); }
     .metric-card {
-        background: #1E293B; border-radius: 12px; padding: 1rem; border: 1px solid #334155;
+        background: #1E293B; border-radius: 12px; padding: 1rem;
+        border: 1px solid #334155;
     }
-    .stNumberInput>div>div>input { background: #1E293B; color: #F8FAFC; border: 1px solid #475569; }
-    .stSelectbox>div>div>select { background: #1E293B; color: #F8FAFC; }
+    .stNumberInput>div>div>input {
+        background: #1E293B; color: #F8FAFC; border: 1px solid #475569;
+    }
+    .stSelectbox>div>div>select {
+        background: #1E293B; color: #F8FAFC;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-# ---------- Unit Helpers ----------
 def input_metric(value, unit_type):
     if st.session_state.unit_system == "imperial":
         conversions = {
@@ -59,16 +67,72 @@ def unit_label(unit_type):
     return labels.get(unit_type, "")
 
 def render_svg_plan(plan, width=800, height=500):
-    # ... same as before ...
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" style="width:100%; background:#0F172A;">'
     for item in plan:
         x, y, w, h = item["x"], item["y"], item["w"], item["h"]
         color = item.get("color", "#4f46e5")
+        # escape name for SVG
+        name = item["name"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         svg += f'<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{color}" fill-opacity="0.4" stroke="#94a3b8" stroke-width="2"/>'
-        svg += f'<text x="{x+w/2}" y="{y+h/2}" font-size="12" fill="white" text-anchor="middle" dominant-baseline="middle">{item["name"]}</text>'
+        svg += f'<text x="{x+w/2}" y="{y+h/2}" font-size="12" fill="white" text-anchor="middle" dominant-baseline="middle">{name}</text>'
     svg += '</svg>'
     return svg
 
 def generate_3d_html(plan):
-    # ... entire Three.js builder, safely injecting values ...
-    pass
+    """Return an HTML string with Three.js scene for the given plan."""
+    if not plan:
+        return "<p>No plan data.</p>"
+
+    rooms_js = ""
+    for room in plan:
+        x = room["x"] / 1000
+        z = room["y"] / 1000
+        w = room["w"] / 1000
+        d = room["h"] / 1000
+        h = 3.0
+        color = room.get("color", "#4f46e5")
+        # use json.dumps to safely insert values into JavaScript
+        rooms_js += f"""
+            geometry = new THREE.BoxGeometry({json.dumps(w)}, {json.dumps(h)}, {json.dumps(d)});
+            material = new THREE.MeshPhongMaterial({{color: {json.dumps(color)}, opacity: 0.7, transparent: true}});
+            cube = new THREE.Mesh(geometry, material);
+            cube.position.set({json.dumps(x + w/2)}, {json.dumps(h/2)}, {json.dumps(z + d/2)});
+            scene.add(cube);
+        """
+
+    html = f"""
+    <html>
+    <head>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    </head>
+    <body style="margin:0; overflow:hidden;">
+        <script>
+            var scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a);
+            var camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(8, 6, 10);
+            var renderer = new THREE.WebGLRenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            var controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.set(4, 1.5, 2.5);
+            controls.update();
+            var light = new THREE.DirectionalLight(0xffffff, 1);
+            light.position.set(5, 10, 7);
+            scene.add(light);
+            var ambient = new THREE.AmbientLight(0x404040);
+            scene.add(ambient);
+            var geometry, material, cube;
+            {rooms_js}
+            function animate() {{
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }}
+            animate();
+        </script>
+    </body>
+    </html>
+    """
+    return html
