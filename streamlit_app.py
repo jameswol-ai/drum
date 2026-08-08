@@ -719,3 +719,4 @@ else:  # Archives
                     st.write("No plan data.")
     else:
         st.info("No projects yet. Go to the Project Dashboard to create one.")
+
