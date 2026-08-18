@@ -1,257 +1,227 @@
 # main.py
-# Game helpers for DRUM – user management, memory, quests, building, rhythm
 import json
-import hashlib
-import random
+import os
 import uuid
-from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime
+from copy import deepcopy
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-USER_FILE = DATA_DIR / "users.json"
-MAX_BUILDINGS = 10
-MAX_LOGS = 50
-MAX_SESSIONS = 20
-XP_PER_LEVEL = 100
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# ---------- Password & user helpers ----------
-def hash_password(password: str) -> str:
-    return hashlib.sha256((password + "drum_salt_42").encode()).hexdigest()
+# ---------- File paths ----------
+DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
+MEMORY_DIR = os.path.join(DATA_DIR, "memory")
 
-def load_users() -> list:
-    if USER_FILE.exists():
-        try:
-            with open(USER_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return []
-    return []
-
-def save_users(users: list):
-    with open(USER_FILE, "w") as f:
-        json.dump(users, f, indent=2)
-
-def get_user(username: str) -> dict | None:
-    for u in load_users():
-        if u["username"] == username:
-            return u
-    return None
-
-def create_user(username: str, password: str, role: str = "user") -> dict:
-    users = load_users()
-    if get_user(username):
-        raise ValueError("Username already exists.")
-    user = {
-        "username": username,
-        "password_hash": hash_password(password),
-        "role": role,
-        "level": 1,
-        "xp": 0,
-        "badges": []
-    }
-    users.append(user)
-    save_users(users)
-    return user
-
-def authenticate(username: str, password: str) -> dict | None:
-    user = get_user(username)
-    if user and user["password_hash"] == hash_password(password):
-        return user
-    return None
-
-def update_user_data(username: str, updates: dict):
-    users = load_users()
-    for u in users:
-        if u["username"] == username:
-            u.update(updates)
-            break
-    save_users(users)
-
-def xp_for_level(level: int) -> int:
-    return level * XP_PER_LEVEL
-
-def add_xp(username: str, amount: int) -> bool:
-    user = get_user(username)
-    if not user:
-        return False
-    old_level = user["level"]
-    user["xp"] += amount
-    while user["xp"] >= xp_for_level(user["level"]):
-        user["xp"] -= xp_for_level(user["level"])
-        user["level"] += 1
-        badge = f"level_{user['level']}"
-        if user["level"] % 5 == 0 and badge not in user["badges"]:
-            user["badges"].append(badge)
-    update_user_data(username, {"level": user["level"], "xp": user["xp"], "badges": user["badges"]})
-    return user["level"] > old_level
-
-# ---------- Per‑user memory ----------
+# ---------- Default state ----------
 DEFAULT_STATE = {
     "buildings": [],
-    "rhythms": [],
-    "logs": [],
-    "sessions": [],
-    "quests": [],
-    "daily_quests": [],
-    "daily_reset": ""
+    "logs": []
 }
 
-def get_memory_path(username: str) -> Path:
-    return DATA_DIR / f"{username}_drum_memory.json"
+# ---------- Utility functions ----------
+def ensure_dirs():
+    os.makedirs(MEMORY_DIR, exist_ok=True)
 
-def load_memory(username: str) -> dict:
-    path = get_memory_path(username)
-    if path.exists():
-        try:
-            with open(path) as f:
-                data = json.load(f)
-                for k in DEFAULT_STATE:
-                    if k not in data:
-                        data[k] = DEFAULT_STATE[k]
-                return data
-        except:
-            pass
-    return DEFAULT_STATE.copy()
+def load_users():
+    ensure_dirs()
+    if not os.path.exists(USERS_FILE):
+        return {}
+    try:
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
 
-def save_memory(username: str, memory: dict):
-    if len(memory["buildings"]) > MAX_BUILDINGS:
-        memory["buildings"] = memory["buildings"][-MAX_BUILDINGS:]
-    if len(memory["logs"]) > MAX_LOGS:
-        memory["logs"] = memory["logs"][-MAX_LOGS:]
-    if len(memory["sessions"]) > MAX_SESSIONS:
-        memory["sessions"] = memory["sessions"][-MAX_SESSIONS:]
-    with open(get_memory_path(username), "w") as f:
+def save_users(users):
+    ensure_dirs()
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+def get_user(username):
+    users = load_users()
+    return users.get(username)
+
+def create_user(username, password, role="user"):
+    users = load_users()
+    if username in users:
+        raise ValueError("Username already exists")
+    users[username] = {
+        "password": generate_password_hash(password),
+        "role": role,
+        "created_at": datetime.now().isoformat(),
+        "xp": 0,
+        "level": 1,
+        "quests": init_quests(),
+    }
+    save_users(users)
+    return users[username]
+
+def authenticate(username, password):
+    users = load_users()
+    user = users.get(username)
+    if not user:
+        return None
+
+    stored_pw = user.get("password", "")
+
+    # If stored password looks like a hash, verify normally
+    if stored_pw.startswith(("pbkdf2:", "scrypt:")):
+        if check_password_hash(stored_pw, password):
+            return user
+        return None
+
+    # Legacy plain‑text password (e.g., "admin123") – allow once and upgrade
+    if stored_pw == password:
+        user["password"] = generate_password_hash(password)
+        users[username] = user
+        save_users(users)
+        return user
+
+    return None
+
+def update_user_data(username, data):
+    users = load_users()
+    if username in users:
+        users[username].update(data)
+        save_users(users)
+
+def xp_for_level(level):
+    return level * 100
+
+def add_xp(username, amount):
+    user = get_user(username)
+    if not user:
+        return None
+    user["xp"] = user.get("xp", 0) + amount
+    # Level up logic
+    while user["xp"] >= xp_for_level(user.get("level", 1)):
+        user["xp"] -= xp_for_level(user.get("level", 1))
+        user["level"] = user.get("level", 1) + 1
+    update_user_data(username, user)
+    return user
+
+# ---------- Memory (per‑user data) ----------
+def memory_file(username):
+    return os.path.join(MEMORY_DIR, f"{username}.json")
+
+def load_memory(username):
+    ensure_dirs()
+    path = memory_file(username)
+    if not os.path.exists(path):
+        return deepcopy(DEFAULT_STATE)
+    try:
+        with open(path, "r") as f:
+            mem = json.load(f)
+            # Ensure all keys exist
+            for key, val in DEFAULT_STATE.items():
+                if key not in mem:
+                    mem[key] = val
+            return mem
+    except (json.JSONDecodeError, IOError):
+        return deepcopy(DEFAULT_STATE)
+
+def save_memory(username, memory):
+    ensure_dirs()
+    path = memory_file(username)
+    with open(path, "w") as f:
         json.dump(memory, f, indent=2)
 
-def log_event(username: str, memory: dict, msg: str):
-    memory["logs"].append({"time": datetime.now().isoformat(), "msg": msg})
+def log_event(username, memory, message):
+    log_entry = {
+        "time": datetime.now().isoformat(),
+        "msg": message
+    }
+    memory.setdefault("logs", []).append(log_entry)
+    # Keep only last 100 entries to avoid file bloat
+    memory["logs"] = memory["logs"][-100:]
     save_memory(username, memory)
 
-# ---------- Building & Evolution ----------
+# ---------- Building model ----------
 class Building:
-    def __init__(self, id=None, name="", score=50, plan=None):
-        self.id = id or str(uuid.uuid4())[:6].upper()
-        self.name = name or f"Bldg_{self.id}"
+    def __init__(self, name="Untitled", score=0, plan=None, id=None):
+        self.id = id or str(uuid.uuid4())
+        self.name = name
         self.score = score
-        self.plan = plan if plan is not None else []
+        self.plan = plan or []
+        self.created_at = datetime.now().isoformat()
 
     def to_dict(self):
-        return {"id": self.id, "name": self.name, "score": self.score, "plan": self.plan}
+        return {
+            "id": self.id,
+            "name": self.name,
+            "score": self.score,
+            "plan": self.plan,
+            "created_at": self.created_at,
+        }
 
-    @staticmethod
-    def from_dict(d):
-        b = Building(d["id"], d.get("name", ""), d["score"], d.get("plan", []))
-        if not b.plan:
-            generate_plan(b)
+    @classmethod
+    def from_dict(cls, data):
+        b = cls(name=data.get("name", "Untitled"),
+                score=data.get("score", 0),
+                plan=data.get("plan", []),
+                id=data.get("id"))
+        b.created_at = data.get("created_at", b.created_at)
         return b
 
-def generate_plan(building, width=800, height=500):
+# ---------- Plan generation (simple random) ----------
+def generate_plan(building, num_rooms=5):
+    """Fill building.plan with random rooms."""
+    import random
+    colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"]
     plan = []
-    cols, rows = 4, 3
-    cw, ch = width // cols, height // rows
-    for i in range(cols * rows):
+    for i in range(num_rooms):
+        w = random.randint(100, 200) * 5
+        h = random.randint(100, 200) * 5
+        x = random.randint(0, 800 - w)
+        y = random.randint(0, 500 - h)
         plan.append({
-            "x": (i % cols) * cw + 5, "y": (i // cols) * ch + 5,
-            "w": cw - 10, "h": ch - 10,
+            "x": x, "y": y, "w": w, "h": h,
             "name": f"Room {i+1}",
-            "color": f"hsl({i * 50}, 70%, 50%)"
+            "color": random.choice(colors)
         })
     building.plan = plan
-    return plan
 
-def simulate_evolution(config: dict):
-    trend = []
-    score = 30 + random.randint(0, 20)
-    for _ in range(config["generations"]):
-        score += (70 - score) * 0.1 + random.uniform(-2, 2)
-        score = min(100, max(0, score))
-        trend.append(round(score, 2))
-    best = Building(name=f"Gen_{config['generations']}", score=round(trend[-1], 2))
-    generate_plan(best)
-    return best, trend
-
-# ---------- Rhythm ----------
-def generate_rhythm(building):
-    steps = 16
-    score_norm = building.score / 100
-    rooms = len(building.plan)
-    kick = [1 if i % 4 == 0 else 0 for i in range(steps)]
-    snare = [1 if i % 4 == 2 else 0 for i in range(steps)]
-    hihat = [1 if i % 2 == 0 else 0 for i in range(steps)]
-    mutation = 0.3 * score_norm
-    for i in range(steps):
-        if random.random() < mutation:
-            kick[i] = 1 - kick[i]
-        if random.random() < mutation:
-            snare[i] = 1 - snare[i]
-        if random.random() < mutation:
-            hihat[i] = 1 - hihat[i]
-    for _ in range(rooms):
-        pos = random.randint(0, steps-1)
-        inst = random.choice(["kick", "snare", "hihat"])
-        if inst == "kick":
-            kick[pos] = 1
-        elif inst == "snare":
-            snare[pos] = 1
-        else:
-            hihat[pos] = 1
+# ---------- Quests (simplified) ----------
+def init_quests():
     return {
-        "bpm": 120 + int(score_norm * 30),
-        "steps": steps,
-        "kick": kick,
-        "snare": snare,
-        "hihat": hihat
+        "create_project": {"progress": 0, "target": 1, "completed": False},
+        "run_analysis": {"progress": 0, "target": 1, "completed": False},
     }
 
-# ---------- Quests ----------
-DAILY_TEMPLATE = [
-    {"id": "daily_evolve", "desc": "Complete one evolution", "target": 1, "progress": 0, "reward_xp": 30},
-]
-QUEST_TEMPLATE = [
-    {"id": "evolve_3", "desc": "Evolve 3 buildings", "target": 3, "progress": 0, "reward_xp": 50},
-    {"id": "room_10", "desc": "Create a building with ≥10 rooms", "target": 1, "progress": 0, "reward_badge": "room_master"},
-]
+def update_quests(username, quest_id, progress_increment=1):
+    user = get_user(username)
+    if not user:
+        return
+    quests = user.get("quests", init_quests())
+    if quest_id in quests:
+        q = quests[quest_id]
+        if not q["completed"]:
+            q["progress"] = min(q["target"], q["progress"] + progress_increment)
+            if q["progress"] >= q["target"]:
+                q["completed"] = True
+        user["quests"] = quests
+        update_user_data(username, user)
 
-def init_quests(username: str, memory: dict):
-    if "quests" not in memory or not memory["quests"]:
-        memory["quests"] = [q.copy() for q in QUEST_TEMPLATE]
-    today = date.today().isoformat()
-    if memory.get("daily_reset") != today:
-        memory["daily_quests"] = [d.copy() for d in DAILY_TEMPLATE]
-        memory["daily_reset"] = today
-    save_memory(username, memory)
+def grant_quest_rewards(username, quest_id):
+    user = get_user(username)
+    if not user:
+        return
+    quests = user.get("quests", {})
+    q = quests.get(quest_id)
+    if q and q["completed"] and not q.get("rewarded", False):
+        # Give XP as reward
+        add_xp(username, 50)
+        q["rewarded"] = True
+        user["quests"] = quests
+        update_user_data(username, user)
 
-def update_quests(username: str, memory: dict, event: str, data: dict = None):
-    for q in memory["quests"]:
-        if q["id"] == "evolve_3" and event == "evolution":
-            q["progress"] += 1
-        if q["id"] == "room_10" and event == "evolution" and data and len(data.get("plan", [])) >= 10:
-            q["progress"] = 1
-    for dq in memory["daily_quests"]:
-        if dq["id"] == "daily_evolve" and event == "evolution":
-            dq["progress"] += 1
-    save_memory(username, memory)
+# ---------- Placeholders for other functions ----------
+def simulate_evolution(building):
+    """Simulate one evolution step for building score."""
+    # Not implemented in current UI, but kept for compatibility
+    building.score += 1
+    return building
 
-def grant_quest_rewards(username: str, memory: dict, on_level_up=None):
-    leveled_up = False
-    for q in memory["quests"]:
-        if q["progress"] >= q["target"] and not q.get("completed"):
-            if "reward_xp" in q:
-                if add_xp(username, q["reward_xp"]):
-                    leveled_up = True
-            if "reward_badge" in q:
-                user = get_user(username)
-                if user and q["reward_badge"] not in user["badges"]:
-                    user["badges"].append(q["reward_badge"])
-                    update_user_data(username, {"badges": user["badges"]})
-            q["completed"] = True
-    for dq in memory["daily_quests"]:
-        if dq["progress"] >= dq["target"] and not dq.get("completed"):
-            if "reward_xp" in dq:
-                if add_xp(username, dq["reward_xp"]):
-                    leveled_up = True
-            dq["completed"] = True
-    if leveled_up and on_level_up:
-        on_level_up()
-    save_memory(username, memory)
+def generate_rhythm():
+    """Generate a random rhythm string (unused)."""
+    return "♩♪♫"
