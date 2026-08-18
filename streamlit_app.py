@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 import random
 import math
+import os
 
 from main import (
     load_users, save_users, get_user, create_user, authenticate,
@@ -56,8 +57,15 @@ if "logged_in" not in st.session_state:
     st.session_state.show_north = False
     st.session_state.show_dimensions = True
 
+# ---------- Admin user creation (secure) ----------
 if not load_users():
-    create_user("admin", "admin123", role="admin")
+    admin_user = os.environ.get("DRUM_ADMIN_USER", "admin")
+    admin_pass = os.environ.get("DRUM_ADMIN_PASS", None)
+    if admin_pass is None:
+        # Only for local dev; in production always set DRUM_ADMIN_PASS
+        admin_pass = "admin123"
+        print("WARNING: Using default admin password. Set DRUM_ADMIN_PASS env variable.")
+    create_user(admin_user, admin_pass, role="admin")
 
 # ---------- CSS ----------
 st.markdown("""
@@ -138,9 +146,7 @@ def generate_svg_string(plan, width=800, height=500,
                         show_grid=False, grid_spacing_mm=1000,
                         show_north=False, orientation="north",
                         show_dimensions=True):
-    """Return an SVG string for the plan, with optional grid/north/dimensions."""
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" id="plan-svg" style="width:100%; background:#0F172A;">'
-
     if show_grid and grid_spacing_mm > 0:
         x = 0
         while x <= width:
@@ -150,7 +156,6 @@ def generate_svg_string(plan, width=800, height=500,
         while y <= height:
             svg += f'<line x1="0" y1="{y}" x2="{width}" y2="{y}" stroke="#334155" stroke-width="0.5" stroke-dasharray="4,4"/>'
             y += grid_spacing_mm
-
     for item in plan:
         x, y, w, h = item["x"], item["y"], item["w"], item["h"]
         color = item.get("color", "#4f46e5")
@@ -160,7 +165,6 @@ def generate_svg_string(plan, width=800, height=500,
         if show_dimensions:
             dims = f"{w}×{h} mm"
             svg += f'<text x="{x+w/2}" y="{y+h/2 + 12}" font-size="10" fill="#94a3b8" text-anchor="middle" dominant-baseline="middle">{dims}</text>'
-
     if show_north:
         arrow_x = width - 70
         arrow_y = 40
@@ -173,13 +177,10 @@ def generate_svg_string(plan, width=800, height=500,
             <text x="0" y="30" text-anchor="middle" font-size="14" fill="#FBBF24" font-weight="bold">N</text>
         </g>
         '''
-
     svg += '</svg>'
     return svg
 
-# ---------- Helper to persist building changes ----------
 def update_building_plan(building, mem, username):
-    """Update the building in memory and save to disk."""
     for i, b in enumerate(mem["buildings"]):
         if b["id"] == building.id:
             mem["buildings"][i] = building.to_dict()
@@ -188,13 +189,11 @@ def update_building_plan(building, mem, username):
 
 # ---------- Random Floor Plan Generator ----------
 def generate_random_plan(building, num_rooms=4):
-    """Generate a random floor plan with connected rooms."""
     colors = [
         "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
         "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
     ]
     plan = []
-    # Start with a central hall
     hall_w = random.randint(400, 600)
     hall_h = random.randint(400, 600)
     hall_x = 400 - hall_w // 2
@@ -203,42 +202,26 @@ def generate_random_plan(building, num_rooms=4):
         "x": hall_x, "y": hall_y, "w": hall_w, "h": hall_h,
         "name": "Hall", "color": "#94A3B8"
     })
-
-    directions = [
-        {"side": "top", "dx": 0, "dy": -1, "rot": 0},
-        {"side": "bottom", "dx": 0, "dy": 1, "rot": 0},
-        {"side": "left", "dx": -1, "dy": 0, "rot": 0},
-        {"side": "right", "dx": 1, "dy": 0, "rot": 0},
-    ]
-
+    directions = ["top", "bottom", "left", "right"]
     for i in range(num_rooms):
-        if not plan:
-            break
-        # Pick a random parent room that hasn't been used too many times
         parent = random.choice(plan)
         dir = random.choice(directions)
-        # Calculate new room dimensions
         new_w = random.randint(300, 500)
         new_h = random.randint(300, 500)
-
-        if dir["side"] == "top":
+        if dir == "top":
             new_x = parent["x"] + (parent["w"] - new_w) // 2
-            new_y = parent["y"] - new_h - 10  # small gap
-        elif dir["side"] == "bottom":
+            new_y = parent["y"] - new_h - 10
+        elif dir == "bottom":
             new_x = parent["x"] + (parent["w"] - new_w) // 2
             new_y = parent["y"] + parent["h"] + 10
-        elif dir["side"] == "left":
+        elif dir == "left":
             new_x = parent["x"] - new_w - 10
             new_y = parent["y"] + (parent["h"] - new_h) // 2
         else:  # right
             new_x = parent["x"] + parent["w"] + 10
             new_y = parent["y"] + (parent["h"] - new_h) // 2
-
-        # Keep within bounds
         new_x = max(0, min(new_x, 800 - new_w))
         new_y = max(0, min(new_y, 500 - new_h))
-
-        # Simple overlap check (skip if too much overlap)
         overlap = False
         for r in plan:
             if (new_x < r["x"] + r["w"] and new_x + new_w > r["x"] and
@@ -252,7 +235,6 @@ def generate_random_plan(building, num_rooms=4):
                 "color": random.choice(colors)
             })
     building.plan = plan
-
 
 # ======================
 # LOGIN PAGE
@@ -375,7 +357,6 @@ with st.sidebar:
 if page == "Project Dashboard":
     st.title("🏢 Project Dashboard")
 
-    # ---- Top metrics for active project ----
     if st.session_state.active_building:
         building = st.session_state.active_building
         plan = building.plan
@@ -402,7 +383,6 @@ if page == "Project Dashboard":
 
     st.markdown("---")
 
-    # ---- Main layout ----
     left_col, right_col = st.columns([1, 3])
 
     with left_col:
@@ -462,7 +442,6 @@ if page == "Project Dashboard":
         else:
             st.caption("Need at least 2 projects to compare.")
 
-        # ---- Live Area Breakdown ----
         if st.session_state.active_building:
             st.markdown("---")
             st.markdown("### 📏 Room Areas")
@@ -483,7 +462,6 @@ if page == "Project Dashboard":
             building = st.session_state.active_building
             plan = building.plan
 
-            # ---- Grid & Orientation Controls ----
             with st.expander("🧭 Grid & Orientation", expanded=False):
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
@@ -510,7 +488,6 @@ if page == "Project Dashboard":
                     show_dim = st.checkbox("Show Dimensions", value=st.session_state.show_dimensions, key="show_dim_cb")
                     st.session_state.show_dimensions = show_dim
 
-            # ---- 2D Plan (static SVG) ----
             st.markdown("#### 📐 2D Floor Plan")
             if plan:
                 svg_str = generate_svg_string(
@@ -525,7 +502,6 @@ if page == "Project Dashboard":
             else:
                 st.info("No plan data.")
 
-            # ---- Plan Editor (extended) ----
             with st.expander("✏️ Edit Plan (Add / Remove / Modify Rooms)", expanded=False):
                 col_edit1, col_edit2 = st.columns(2)
                 with col_edit1:
@@ -576,7 +552,6 @@ if page == "Project Dashboard":
                             update_building_plan(building, mem, username)
                             st.rerun()
 
-                # ---- Nudge selected room ----
                 if plan:
                     st.markdown("---")
                     st.markdown("**↕️ Nudge selected room**")
@@ -607,7 +582,6 @@ if page == "Project Dashboard":
                         update_building_plan(building, mem, username)
                         st.rerun()
 
-            # ---- 3D Model ----
             st.markdown("#### 🧊 Interactive 3D Model")
             if plan:
                 rooms_js = ""
@@ -664,7 +638,6 @@ if page == "Project Dashboard":
             else:
                 st.info("3D view requires a building plan.")
 
-            # ---- Cost & Material Estimate ----
             st.markdown("---")
             with st.expander("💰 Cost & Material Estimate", expanded=False):
                 if st.button("Calculate Estimate", key="calc_cost"):
@@ -676,7 +649,6 @@ if page == "Project Dashboard":
                                        f"${cost['total']:,.2f}"]
                     })
 
-            # ---- Export & Share ----
             st.markdown("---")
             with st.expander("📤 Export & Share", expanded=False):
                 if st.button("📄 Download Plan as SVG"):
@@ -694,7 +666,6 @@ if page == "Project Dashboard":
         else:
             st.info("👈 Select a project from the list or create a new one to start.")
 
-    # ---- Recent Activity ----
     st.markdown("---")
     st.subheader("🕓 Recent Activity")
     if mem["logs"]:
@@ -725,7 +696,7 @@ elif page == "Structural Analysis":
         "🧱 Retaining Wall", "🔺 Truss", "📄 Export/Report"
     ])
 
-    # ---- BEAMS (0) ----
+    # ---- BEAMS ----
     with tabs[0]:
         st.subheader("Beam Design")
         beam_mat = st.selectbox("Material", ["Reinforced Concrete", "Steel", "Timber", "Composite"], key="beam_mat")
@@ -759,7 +730,7 @@ elif page == "Structural Analysis":
                 st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
                 st.json(res)
 
-    # ---- COLUMNS (1) ----
+    # ---- COLUMNS ----
     with tabs[1]:
         st.subheader("Column Design")
         col_mat = st.selectbox("Material", ["RC", "Steel", "Timber"], key="col_mat")
@@ -778,7 +749,7 @@ elif page == "Structural Analysis":
                 st.write(f"N_Rd: {output_metric(res['N_rd'], 'force'):.1f} {unit_label('force')}")
                 st.json(res)
 
-    # ---- SLABS (2) ----
+    # ---- SLABS ----
     with tabs[2]:
         st.subheader("Slab Thickness")
         span = ui_number_input(f"Short span ({unit_label('length')})", 2.0, 15.0, 5.0, 0.1, "slab_span", "length")
@@ -786,7 +757,7 @@ elif page == "Structural Analysis":
         t = slab_thickness_estimate(span, support)
         st.success(f"Recommended thickness: **{output_metric(t*1000, 'length_mm'):.0f} {unit_label('length_mm')}**")
 
-    # ---- FOUNDATIONS (3) ----
+    # ---- FOUNDATIONS ----
     with tabs[3]:
         st.subheader("Pad Footing Sizing")
         load = ui_number_input(f"Total column load ({unit_label('force')})", 100.0, 10000.0, 500.0, 10.0, "fdn_load", "force")
@@ -796,7 +767,7 @@ elif page == "Structural Analysis":
             res = foundation_size(bearing, load, fs)
             st.success(f"Square footing side: **{output_metric(res['side_m'], 'length'):.2f} {unit_label('length')}** (area: {output_metric(res['area_m2'], 'area'):.2f} {unit_label('area')})")
 
-    # ---- WALLS & FINISHES (4) ----
+    # ---- WALLS & FINISHES ----
     with tabs[4]:
         st.subheader("Wall Types & Finishes")
         wall = st.selectbox("Wall Type", list(WALL_TYPES.keys()), key="wall_type")
@@ -810,7 +781,7 @@ elif page == "Structural Analysis":
         if st.button("Apply to Model", key="apply_wall"):
             st.info("Wall/finish selection saved to project.")
 
-    # ---- PILES (5) ----
+    # ---- PILES ----
     with tabs[5]:
         st.subheader("Pile Foundation Design (Simplified EC7)")
         pile_type = st.selectbox("Pile type", ["Bored", "Driven"], key="pile_type")
@@ -825,7 +796,7 @@ elif page == "Structural Analysis":
             st.write(f"Ultimate capacity: {output_metric(res['Q_ult_kN'], 'force'):.1f} {unit_label('force')}")
             st.write(f"Shaft resistance: {output_metric(res['shaft_kN'], 'force'):.1f} {unit_label('force')}, Base: {output_metric(res['base_kN'], 'force'):.1f} {unit_label('force')}")
 
-    # ---- PRESTRESSED (6) ----
+    # ---- PRESTRESSED ----
     with tabs[6]:
         st.subheader("Prestressed Concrete Beam (Stress Check)")
         M_ext = ui_number_input(f"External moment ({unit_label('moment')})", 100.0, 5000.0, 500.0, 10.0, "pre_M", "moment")
@@ -845,7 +816,7 @@ elif page == "Structural Analysis":
             st.write(f"Allowable compression: {output_metric(res['sigma_c_allow'], 'stress'):.2f} {unit_label('stress')}")
             st.write(f"Allowable tension: {output_metric(res['sigma_t_allow'], 'stress'):.2f} {unit_label('stress')}")
 
-    # ---- RETAINING WALL (7) ----
+    # ---- RETAINING WALL ----
     with tabs[7]:
         st.subheader("Cantilever Retaining Wall (Simplified)")
         H = ui_number_input(f"Wall height ({unit_label('length')})", 1.0, 10.0, 3.0, 0.1, "rw_H", "length")
@@ -861,7 +832,7 @@ elif page == "Structural Analysis":
             st.write(f"Active thrust: {output_metric(res['Pa_kN'], 'force'):.2f} {unit_label('force')}/m")
             st.write(f"Overturning SF: {res['F_overt']:.2f}, Sliding SF: {res['F_sliding']:.2f}")
 
-    # ---- TRUSS (8) ----
+    # ---- TRUSS ----
     with tabs[8]:
         st.subheader("2D Truss Solver (coming soon)")
         st.info("This module will perform method-of-joints analysis. Enter nodes, members, loads.")
@@ -869,7 +840,7 @@ elif page == "Structural Analysis":
             res = truss_method_of_joints(None, None, None, None)
             st.json(res)
 
-    # ---- EXPORT / REPORT (9) ----
+    # ---- EXPORT / REPORT ----
     with tabs[9]:
         st.subheader("Export Analysis Report (PDF)")
         if st.button("📄 Generate Report", key="pdf_gen"):
@@ -894,7 +865,6 @@ elif page == "Structural Analysis":
                     st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
                 st.success("Report generated!")
 
-    # ---- BUILDING INTEGRATION ----
     st.markdown("---")
     if st.session_state.active_building:
         st.subheader("📐 Building Plan Analysis")
@@ -913,7 +883,7 @@ elif page == "Structural Analysis":
 # ======================
 # PAGE: ARCHIVES
 # ======================
-else:  # Archives
+else:
     st.title("🗄️ Project Archives")
     if mem["buildings"]:
         for bdict in reversed(mem["buildings"]):
