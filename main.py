@@ -155,8 +155,8 @@ def generate_plan(building, num_rooms=5):
     colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"]
     plan = []
     for i in range(num_rooms):
-        w = random.randint(100, 200) * 5
-        h = random.randint(100, 200) * 5
+        w = random.randint(100, 800)   # ensure width <= 800
+        h = random.randint(100, 500)   # ensure height <= 500
         x = random.randint(0, 800 - w)
         y = random.randint(0, 500 - h)
         plan.append({
