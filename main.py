@@ -12,13 +12,11 @@ DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 USERS_FILE = os.path.join(DATA_DIR, "users.json")
 MEMORY_DIR = os.path.join(DATA_DIR, "memory")
 
-# ---------- Default state ----------
 DEFAULT_STATE = {
     "buildings": [],
     "logs": []
 }
 
-# ---------- Utility functions ----------
 def ensure_dirs():
     os.makedirs(MEMORY_DIR, exist_ok=True)
 
@@ -61,22 +59,16 @@ def authenticate(username, password):
     user = users.get(username)
     if not user:
         return None
-
     stored_pw = user.get("password", "")
-
-    # If stored password looks like a hash, verify normally
     if stored_pw.startswith(("pbkdf2:", "scrypt:")):
         if check_password_hash(stored_pw, password):
             return user
         return None
-
-    # Legacy plain‑text password – allow once and upgrade
     if stored_pw == password:
         user["password"] = generate_password_hash(password)
         users[username] = user
         save_users(users)
         return user
-
     return None
 
 def update_user_data(username, data):
@@ -99,7 +91,6 @@ def add_xp(username, amount):
     update_user_data(username, user)
     return user
 
-# ---------- Memory (per‑user data) ----------
 def memory_file(username):
     return os.path.join(MEMORY_DIR, f"{username}.json")
 
@@ -133,7 +124,6 @@ def log_event(username, memory, message):
     memory["logs"] = memory["logs"][-100:]
     save_memory(username, memory)
 
-# ---------- Building model ----------
 class Building:
     def __init__(self, name="Untitled", score=0, plan=None, id=None):
         self.id = id or str(uuid.uuid4())
@@ -160,7 +150,6 @@ class Building:
         b.created_at = data.get("created_at", b.created_at)
         return b
 
-# ---------- Plan generation (simple random) ----------
 def generate_plan(building, num_rooms=5):
     import random
     colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"]
@@ -177,7 +166,6 @@ def generate_plan(building, num_rooms=5):
         })
     building.plan = plan
 
-# ---------- Quests (simplified) ----------
 def init_quests():
     return {
         "create_project": {"progress": 0, "target": 1, "completed": False},
@@ -210,7 +198,6 @@ def grant_quest_rewards(username, quest_id):
         user["quests"] = quests
         update_user_data(username, user)
 
-# ---------- Placeholders for other functions ----------
 def simulate_evolution(building):
     building.score += 1
     return building
@@ -220,12 +207,10 @@ def generate_rhythm():
 
 # ---------- User Management (Roles & Permissions) ----------
 def list_users():
-    """Return list of all users (dicts with username, role)."""
     users = load_users()
     return [{"username": u, "role": data.get("role", "viewer")} for u, data in users.items()]
 
 def update_user_role(username, new_role):
-    """Change user's role."""
     allowed_roles = {"admin", "engineer", "viewer"}
     if new_role not in allowed_roles:
         raise ValueError(f"Role must be one of {allowed_roles}")
@@ -236,11 +221,9 @@ def update_user_role(username, new_role):
     save_users(users)
 
 def delete_user(username):
-    """Delete a user (prevent deleting the last admin)."""
     users = load_users()
     if username not in users:
         return False
-    # Ensure at least one admin remains
     if users[username]["role"] == "admin":
         admin_count = sum(1 for u in users.values() if u.get("role") == "admin")
         if admin_count <= 1:
@@ -250,9 +233,7 @@ def delete_user(username):
     return True
 
 def is_admin(user_data):
-    """Return True if user is admin."""
     return user_data and user_data.get("role") == "admin"
 
 def is_engineer(user_data):
-    """Return True if user is engineer or admin."""
     return user_data and user_data.get("role") in ("admin", "engineer")
