@@ -14,7 +14,16 @@ MEMORY_DIR = os.path.join(DATA_DIR, "memory")
 
 DEFAULT_STATE = {
     "buildings": [],
-    "logs": []
+    "logs": [],
+    "settings": {
+        "theme": "dark",
+        "default_material_costs": {
+            "concrete": 150,
+            "steel": 80,
+            "glass": 120,
+            "labor": 100,
+        }
+    }
 }
 
 def ensure_dirs():
@@ -125,12 +134,15 @@ def log_event(username, memory, message):
     save_memory(username, memory)
 
 class Building:
-    def __init__(self, name="Untitled", score=0, plan=None, id=None):
+    def __init__(self, name="Untitled", score=0, plan=None, id=None, building_type="residential", storeys=1):
         self.id = id or str(uuid.uuid4())
         self.name = name
         self.score = score
         self.plan = plan or []
         self.created_at = datetime.now().isoformat()
+        self.building_type = building_type
+        self.storeys = storeys
+        self.floors = []  # For multi-storey
 
     def to_dict(self):
         return {
@@ -139,6 +151,9 @@ class Building:
             "score": self.score,
             "plan": self.plan,
             "created_at": self.created_at,
+            "building_type": self.building_type,
+            "storeys": self.storeys,
+            "floors": self.floors,
         }
 
     @classmethod
@@ -146,8 +161,11 @@ class Building:
         b = cls(name=data.get("name", "Untitled"),
                 score=data.get("score", 0),
                 plan=data.get("plan", []),
-                id=data.get("id"))
+                id=data.get("id"),
+                building_type=data.get("building_type", "residential"),
+                storeys=data.get("storeys", 1))
         b.created_at = data.get("created_at", b.created_at)
+        b.floors = data.get("floors", [])
         return b
 
 def generate_plan(building, num_rooms=5):
@@ -155,8 +173,8 @@ def generate_plan(building, num_rooms=5):
     colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"]
     plan = []
     for i in range(num_rooms):
-        w = random.randint(100, 200) * 5
-        h = random.randint(100, 200) * 5
+        w = random.randint(100, 800)
+        h = random.randint(100, 500)
         x = random.randint(0, 800 - w)
         y = random.randint(0, 500 - h)
         plan.append({
@@ -205,7 +223,7 @@ def simulate_evolution(building):
 def generate_rhythm():
     return "♩♪♫"
 
-# ---------- User Management (Roles & Permissions) ----------
+# ---------- User Management ----------
 def list_users():
     users = load_users()
     return [{"username": u, "role": data.get("role", "viewer")} for u, data in users.items()]
@@ -239,8 +257,7 @@ def is_engineer(user_data):
     return user_data and user_data.get("role") in ("admin", "engineer")
 
 # ---------- Analysis Storage ----------
-def save_analysis(username, analysis_type, data):
-    """Save an analysis result to user's memory."""
+def save_analysis(username, analysis_type, data, project_id=None):
     mem = load_memory(username)
     if "analyses" not in mem:
         mem["analyses"] = []
@@ -249,27 +266,27 @@ def save_analysis(username, analysis_type, data):
         "type": analysis_type,
         "data": data,
         "created_at": datetime.now().isoformat(),
+        "project_id": project_id,
     }
     mem["analyses"].append(analysis_entry)
     save_memory(username, mem)
     return analysis_entry["id"]
 
-def get_analyses(username, analysis_type=None):
-    """Get all saved analyses for a user, optionally filtered by type."""
+def get_analyses(username, analysis_type=None, project_id=None):
     mem = load_memory(username)
     analyses = mem.get("analyses", [])
     if analysis_type:
-        return [a for a in analyses if a["type"] == analysis_type]
+        analyses = [a for a in analyses if a["type"] == analysis_type]
+    if project_id:
+        analyses = [a for a in analyses if a.get("project_id") == project_id]
     return analyses
 
 def delete_analysis(username, analysis_id):
-    """Delete a saved analysis."""
     mem = load_memory(username)
     mem["analyses"] = [a for a in mem.get("analyses", []) if a["id"] != analysis_id]
     save_memory(username, mem)
 
 def update_analysis(username, analysis_id, new_data):
-    """Update a saved analysis."""
     mem = load_memory(username)
     for a in mem.get("analyses", []):
         if a["id"] == analysis_id:
@@ -277,3 +294,70 @@ def update_analysis(username, analysis_id, new_data):
             a["updated_at"] = datetime.now().isoformat()
             break
     save_memory(username, mem)
+
+# ---------- Project Templates ----------
+def get_project_templates():
+    return {
+        "Residential House": {
+            "rooms": ["Living Room", "Kitchen", "Bedroom 1", "Bedroom 2", "Bathroom"],
+            "storeys": 1,
+        },
+        "Office Building": {
+            "rooms": ["Reception", "Open Office", "Meeting Room", "Server Room", "Restroom"],
+            "storeys": 3,
+        },
+        "Warehouse": {
+            "rooms": ["Storage Area", "Loading Dock", "Office", "Restroom"],
+            "storeys": 1,
+        },
+        "Retail Store": {
+            "rooms": ["Sales Floor", "Storage", "Office", "Restroom"],
+            "storeys": 1,
+        },
+    }
+
+# ---------- Material Costs ----------
+def get_material_costs(username):
+    mem = load_memory(username)
+    return mem.get("settings", {}).get("default_material_costs", {
+        "concrete": 150,
+        "steel": 80,
+        "glass": 120,
+        "labor": 100,
+    })
+
+def update_material_costs(username, costs):
+    mem = load_memory(username)
+    if "settings" not in mem:
+        mem["settings"] = {}
+    mem["settings"]["default_material_costs"] = costs
+    save_memory(username, mem)
+
+# ---------- Theme ----------
+def get_theme(username):
+    mem = load_memory(username)
+    return mem.get("settings", {}).get("theme", "dark")
+
+def update_theme(username, theme):
+    mem = load_memory(username)
+    if "settings" not in mem:
+        mem["settings"] = {}
+    mem["settings"]["theme"] = theme
+    save_memory(username, mem)
+
+# ---------- Collaboration ----------
+def share_project(username, project_id, shared_with_username):
+    mem = load_memory(username)
+    if "shared_projects" not in mem:
+        mem["shared_projects"] = {}
+    if project_id not in mem["shared_projects"]:
+        mem["shared_projects"][project_id] = []
+    if shared_with_username not in mem["shared_projects"][project_id]:
+        mem["shared_projects"][project_id].append(shared_with_username)
+        save_memory(username, mem)
+        return True
+    return False
+
+def get_shared_projects(username):
+    mem = load_memory(username)
+    return mem.get("shared_projects", {})
