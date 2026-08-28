@@ -356,7 +356,6 @@ def generate_safe_plan(building, num_rooms=4, grid_spacing_mm=500):
         parent = random.choice(plan)
         dir = random.choice(directions)
         
-        # Safe dimensions
         new_w = min(600, max(grid_spacing_mm, round(random.randint(200, 600) / grid_spacing_mm) * grid_spacing_mm))
         new_h = min(400, max(grid_spacing_mm, round(random.randint(200, 400) / grid_spacing_mm) * grid_spacing_mm))
         
@@ -375,11 +374,9 @@ def generate_safe_plan(building, num_rooms=4, grid_spacing_mm=500):
             new_x = parent["x"] + parent["w"] + gap
             new_y = parent["y"] + (parent["h"] - new_h) // 2
         
-        # Clamp to bounds
         new_x = max(0, min(new_x, 800 - new_w))
         new_y = max(0, min(new_y, 500 - new_h))
         
-        # Align to grid
         new_x = round(new_x / grid_spacing_mm) * grid_spacing_mm
         new_y = round(new_y / grid_spacing_mm) * grid_spacing_mm
         new_x = max(0, min(new_x, 800 - new_w))
@@ -400,7 +397,6 @@ def generate_safe_plan(building, num_rooms=4, grid_spacing_mm=500):
     building.plan = plan
 
 def get_engineering_news():
-    """Return a list of engineering and structural analysis news items."""
     news = [
         {
             "title": "Eurocode Updates: EN 1992-1-1 Amendment Published",
@@ -699,7 +695,8 @@ if page == "Project Dashboard":
                         if st.session_state.unit_system == "metric":
                             disp_spacing = st.session_state.grid_spacing_mm / 1000.0
                             label = "Grid spacing (m)"
-                            step = 0.1                        else:
+                            step = 0.1
+                        else:
                             disp_spacing = st.session_state.grid_spacing_mm / 304.8
                             label = "Grid spacing (ft)"
                             step = 1.0
