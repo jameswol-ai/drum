@@ -581,3 +581,230 @@ def steel_connection_check(connection_type, bolt_dia, bolt_grade, num_bolts, pla
         }
     else:
         return {"error": "Invalid connection type"}
+
+
+# ======================
+# PDF REPORT GENERATION (ReportLab)
+# ======================
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderPDF
+    from svglib.svglib import svg2rlg
+    from io import BytesIO
+    import matplotlib.pyplot as plt
+    import matplotlib
+    matplotlib.use("Agg")
+except ImportError:
+    # Graceful fallback if reportlab is not installed
+    pass
+
+def generate_pdf_report(project_data, plan_svg_string=None, analysis_results=None, cost_breakdown=None, filename=None):
+    """
+    Generate a professional PDF report.
+    project_data: dict with keys like 'Project Name', 'Engineer', 'Date', etc.
+    plan_svg_string: SVG string of plan (optional) – will be rendered if svglib available.
+    analysis_results: dict with structural check results (optional)
+    cost_breakdown: dict with cost items (optional)
+    filename: output filename
+    Returns (filename, error)
+    """
+    if not filename:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"report_{timestamp}.pdf"
+    try:
+        doc = SimpleDocTemplate(filename, pagesize=A4,
+                                rightMargin=72, leftMargin=72,
+                                topMargin=72, bottomMargin=18)
+        styles = getSampleStyleSheet()
+        title_style = styles["Title"]
+        normal_style = styles["Normal"]
+        heading_style = styles["Heading2"]
+
+        story = []
+        # Title
+        story.append(Paragraph("DRUM Studio Structural Report", title_style))
+        story.append(Spacer(1, 12))
+        # Project info
+        if project_data:
+            for key, value in project_data.items():
+                story.append(Paragraph(f"<b>{key}:</b> {value}", normal_style))
+            story.append(Spacer(1, 12))
+
+        # Plan image
+        if plan_svg_string:
+            try:
+                # Convert SVG to reportlab drawing
+                drawing = svg2rlg(BytesIO(plan_svg_string.encode('utf-8')))
+                if drawing:
+                    drawing.scale(0.5, 0.5)  # adjust size
+                    story.append(Paragraph("Floor Plan", heading_style))
+                    story.append(drawing)
+                    story.append(Spacer(1, 12))
+            except Exception as e:
+                story.append(Paragraph(f"Plan image could not be rendered: {e}", normal_style))
+
+        # Analysis results
+        if analysis_results:
+            story.append(Paragraph("Structural Analysis Results", heading_style))
+            for key, value in analysis_results.items():
+                story.append(Paragraph(f"<b>{key}:</b> {value}", normal_style))
+            story.append(Spacer(1, 12))
+
+        # Cost breakdown
+        if cost_breakdown:
+            story.append(Paragraph("Cost Estimate", heading_style))
+            table_data = [["Item", "Cost (USD)"]]
+            for item, cost in cost_breakdown.items():
+                table_data.append([item, f"${cost:,.2f}"])
+            table = Table(table_data, colWidths=[200, 100])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.grey),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ]))
+            story.append(table)
+
+        doc.build(story)
+        return filename, None
+    except Exception as e:
+        return None, str(e)
+
+
+# ======================
+# BEAM DIAGRAM FUNCTIONS (Moment / Shear)
+# ======================
+def plot_beam_diagrams(beam_type, span_m, load_type, load_value, point_load_pos=None):
+    """
+    Generate moment and shear diagrams using matplotlib.
+    beam_type: 'simply_supported' or 'cantilever'
+    load_type: 'udl' or 'point' or 'none'
+    load_value: UDL in kN/m or point load in kN
+    point_load_pos: for point load, distance from left support (m)
+    Returns a matplotlib figure.
+    """
+    x = [i/100 for i in range(int(span_m*100)+1)]  # 0 to L in 0.01 m steps
+    V = [0]*len(x)
+    M = [0]*len(x)
+    L = span_m
+
+    if beam_type == 'simply_supported':
+        # Reactions
+        if load_type == 'udl':
+            w = load_value
+            R1 = R2 = w * L / 2
+        elif load_type == 'point':
+            P = load_value
+            a = point_load_pos if point_load_pos else L/2
+            b = L - a
+            R1 = P * b / L
+            R2 = P * a / L
+        else:
+            R1 = R2 = 0
+
+        # Shear and moment
+        for i, xi in enumerate(x):
+            # Shear due to left reaction
+            V[i] = R1
+            # subtract loads to the left of xi
+            if load_type == 'udl':
+                V[i] -= w * xi
+            elif load_type == 'point':
+                if xi >= a:
+                    V[i] -= P
+            # Moment = R1*xi - (load effect)
+            M[i] = R1 * xi
+            if load_type == 'udl':
+                M[i] -= w * xi**2 / 2
+            elif load_type == 'point' and xi >= a:
+                M[i] -= P * (xi - a)
+
+    elif beam_type == 'cantilever':
+        # Fixed end at x=0, free at x=L
+        if load_type == 'udl':
+            w = load_value
+            for i, xi in enumerate(x):
+                V[i] = w * xi
+                M[i] = -w * xi**2 / 2
+        elif load_type == 'point':
+            P = load_value
+            a = point_load_pos if point_load_pos else L
+            for i, xi in enumerate(x):
+                if xi >= a:
+                    V[i] = -P
+                    M[i] = -P * (xi - a)
+                else:
+                    V[i] = 0
+                    M[i] = 0
+        else:
+            V = [0]*len(x)
+            M = [0]*len(x)
+
+    # Create figure
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+    ax1.plot(x, V, 'b-', linewidth=2)
+    ax1.set_title("Shear Force Diagram")
+    ax1.set_xlabel("Position (m)")
+    ax1.set_ylabel("Shear (kN)")
+    ax1.grid(True)
+
+    ax2.plot(x, M, 'r-', linewidth=2)
+    ax2.set_title("Bending Moment Diagram")
+    ax2.set_xlabel("Position (m)")
+    ax2.set_ylabel("Moment (kNm)")
+    ax2.grid(True)
+    plt.tight_layout()
+    return fig
+
+
+def plot_truss_deformed(nodes, elements, displacements, scale_factor=50):
+    """
+    Plot original and deformed truss.
+    nodes: dict node_id -> (x,y) in mm
+    elements: list of (n1,n2,E,A)
+    displacements: dict node_id -> (ux,uy) in mm
+    scale_factor: exaggerate deformations for visibility.
+    """
+    fig, ax = plt.subplots(figsize=(8,6))
+    # Original nodes
+    for nid, (x,y) in nodes.items():
+        ax.plot(x, y, 'ko', markersize=5)
+        ax.text(x, y, f' {nid}', fontsize=9)
+    # Original elements
+    for (n1,n2,_,_) in elements:
+        x1,y1 = nodes[n1]
+        x2,y2 = nodes[n2]
+        ax.plot([x1,x2], [y1,y2], 'b-', linewidth=1.5, label='Original' if n1==1 and n2==2 else "")
+    # Deformed nodes
+    for nid, (x,y) in nodes.items():
+        ux,uy = displacements.get(nid, (0,0))
+        xd = x + ux * scale_factor
+        yd = y + uy * scale_factor
+        ax.plot(xd, yd, 'ro', markersize=5)
+    # Deformed elements
+    for (n1,n2,_,_) in elements:
+        x1,y1 = nodes[n1]
+        x2,y2 = nodes[n2]
+        ux1,uy1 = displacements.get(n1, (0,0))
+        ux2,uy2 = displacements.get(n2, (0,0))
+        xd1 = x1 + ux1 * scale_factor
+        yd1 = y1 + uy1 * scale_factor
+        xd2 = x2 + ux2 * scale_factor
+        yd2 = y2 + uy2 * scale_factor
+        ax.plot([xd1,xd2], [yd1,yd2], 'r--', linewidth=1.5, label='Deformed' if n1==1 and n2==2 else "")
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True)
+    ax.set_xlabel('X (mm)')
+    ax.set_ylabel('Y (mm)')
+    ax.set_title('Truss Deformation (exaggerated)')
+    ax.legend()
+    return fig
