@@ -13,7 +13,8 @@ from main import (
     update_user_data, xp_for_level, add_xp, load_memory, save_memory,
     log_event, Building, generate_plan, simulate_evolution, generate_rhythm,
     init_quests, update_quests, grant_quest_rewards, DEFAULT_STATE,
-    list_users, update_user_role, delete_user, is_admin, is_engineer
+    list_users, update_user_role, delete_user, is_admin, is_engineer,
+    save_analysis, get_analyses, delete_analysis, update_analysis
 )
 
 from engineering.materials import CONCRETE_GRADES, STEEL_GRADES, TIMBER_CLASSES, WALL_TYPES, FINISHES
@@ -70,6 +71,8 @@ if "logged_in" not in st.session_state:
     st.session_state.grid_spacing_mm = 500
     st.session_state.show_north = False
     st.session_state.show_dimensions = True
+    st.session_state.saved_analyses = []
+    st.session_state.current_analysis = None
 
 if not load_users():
     admin_user = os.environ.get("DRUM_ADMIN_USER", "admin")
@@ -338,7 +341,6 @@ def generate_safe_plan(building, num_rooms=4, grid_spacing_mm=500):
     ]
     plan = []
     
-    # Central hall
     hall_w = min(600, max(grid_spacing_mm, round(random.randint(400, 600) / grid_spacing_mm) * grid_spacing_mm))
     hall_h = min(500, max(grid_spacing_mm, round(random.randint(400, 500) / grid_spacing_mm) * grid_spacing_mm))
     hall_x = max(0, round((400 - hall_w // 2) / grid_spacing_mm) * grid_spacing_mm)
@@ -549,6 +551,17 @@ with st.sidebar:
                     except ValueError as e:
                         st.error(str(e))
 
+    # Saved Analyses
+    saved = get_analyses(username)
+    if saved:
+        with st.expander(f"Saved Analyses ({len(saved)})"):
+            for a in saved:
+                col_s1, col_s2 = st.columns([3,1])
+                col_s1.write(f"{a['type']} – {a['created_at'][:10]}")
+                if col_s2.button("Delete", key=f"del_analysis_{a['id']}"):
+                    delete_analysis(username, a['id'])
+                    st.rerun()
+
     if st.button("Logout"):
         save_memory(username, mem)
         for key in list(st.session_state.keys()):
@@ -600,16 +613,6 @@ if page == "Project Dashboard":
                 st.session_state.show_grid = True
                 st.session_state.grid_spacing_mm = 500
                 log_event(username, mem, f"Created new project: {new_building.name}")
-                save_memory(username, mem)
-                st.rerun()
-            if st.button("Generate Random Plan", use_container_width=True):
-                new_building = Building(name=f"Random-{len(mem['buildings'])+1}", score=60)
-                generate_safe_plan(new_building, num_rooms=random.randint(4, 8), grid_spacing_mm=500)
-                mem["buildings"].append(new_building.to_dict())
-                st.session_state.active_building = new_building
-                st.session_state.show_grid = True
-                st.session_state.grid_spacing_mm = 500
-                log_event(username, mem, f"Generated random plan: {new_building.name}")
                 save_memory(username, mem)
                 st.rerun()
         else:
@@ -668,7 +671,6 @@ if page == "Project Dashboard":
             else:
                 st.caption("No rooms yet.")
 
-        # News Section
         st.markdown("---")
         st.markdown("### Engineering News")
         news_items = get_engineering_news()
@@ -996,23 +998,9 @@ elif page == "Structural Analysis":
                 else: st.error("Beam fails check")
                 st.write(f"As required: {output_metric(res['As_req'], 'area'):.2f} {unit_label('area')}")
                 st.json(res)
-            st.markdown("---")
-            st.subheader("Beam Diagrams")
-            col_diag1, col_diag2, col_diag3 = st.columns(3)
-            load_type = col_diag1.selectbox("Load type", ["udl", "point", "none"], key="diag_load_type")
-            if load_type == "udl":
-                load_val = col_diag2.number_input("UDL (kN/m)", value=10.0, key="diag_udl")
-                point_pos = 0.0
-            elif load_type == "point":
-                load_val = col_diag2.number_input("Point load (kN)", value=50.0, key="diag_point")
-                point_pos = col_diag3.number_input("Position from left (m)", value=span/2, key="diag_point_pos")
-            else:
-                load_val = 0.0
-                point_pos = 0.0
-            if st.button("Plot Diagrams", key="plot_beam"):
-                fig = plot_beam_diagrams("simply_supported", span, load_type, load_val, point_pos)
-                st.pyplot(fig)
-                plt.close(fig)
+                if st.button("Save This Analysis", key="save_rc_beam"):
+                    save_analysis(username, "RC Beam", {"inputs": {"b": b, "h": h, "d": d, "fck": fck, "M_ed": M_ed, "V_ed": V_ed, "span": span}, "results": res})
+                    st.success("Analysis saved!")
 
         elif beam_mat == "Steel":
             grade = st.selectbox("Steel Grade", list(STEEL_GRADES.keys()), key="beam_steel_grade")
@@ -1028,50 +1016,9 @@ elif page == "Structural Analysis":
                 st.write(f"Utilization: {res['utilization']:.2f}")
                 st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
                 st.json(res)
-
-        elif beam_mat == "Timber":
-            timber_class = st.selectbox("Timber Class", list(TIMBER_CLASSES.keys()), key="beam_timber_class")
-            b = ui_number_input(f"Width ({unit_label('length_mm')})", 50, 400, 100, 10, "beam_timber_b", "length_mm")
-            h = ui_number_input(f"Depth ({unit_label('length_mm')})", 100, 600, 300, 10, "beam_timber_h", "length_mm")
-            span = ui_number_input(f"Span ({unit_label('length')})", 1.0, 15.0, 5.0, 0.1, "beam_timber_span", "length")
-            M_ed = ui_number_input(f"Design Moment M_Ed ({unit_label('moment')})", 5.0, 200.0, 30.0, 1.0, "beam_timber_Med", "moment")
-            V_ed = ui_number_input(f"Design Shear V_Ed ({unit_label('force')})", 1.0, 100.0, 20.0, 1.0, "beam_timber_Ved", "force")
-            load_duration = st.selectbox("Load duration", ["short", "medium", "long"], key="beam_timber_loaddur")
-            if st.button("Check Timber Beam", key="check_timber_beam"):
-                res = check_timber_beam(timber_class, b, h, M_ed, V_ed, span, load_duration)
-                if "error" in res:
-                    st.error(res["error"])
-                elif res["pass"]:
-                    st.success("Timber beam OK")
-                else:
-                    st.error("Timber beam fails")
-                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
-                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
-                st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
-                st.json(res)
-
-        elif beam_mat == "Composite":
-            section = st.selectbox("Steel Section", ["IPE 160", "IPE 220", "IPE 300"], key="comp_section")
-            grade = st.selectbox("Steel Grade", list(STEEL_GRADES.keys()), key="comp_steel_grade")
-            slab_t = ui_number_input(f"Slab thickness ({unit_label('length_mm')})", 50, 200, 120, 10, "comp_slab_t", "length_mm")
-            slab_w = ui_number_input(f"Slab effective width ({unit_label('length_mm')})", 500, 3000, 1500, 100, "comp_slab_w", "length_mm")
-            fck = st.number_input("Concrete fck (MPa)", 20, 50, 30, key="comp_fck")
-            span = ui_number_input(f"Span ({unit_label('length')})", 2.0, 20.0, 8.0, 0.1, "comp_span", "length")
-            M_ed = ui_number_input(f"Design Moment M_Ed ({unit_label('moment')})", 50.0, 1000.0, 200.0, 1.0, "comp_Med", "moment")
-            V_ed = ui_number_input(f"Design Shear V_Ed ({unit_label('force')})", 20.0, 500.0, 100.0, 1.0, "comp_Ved", "force")
-            if st.button("Check Composite Beam", key="check_comp_beam"):
-                steel = STEEL_GRADES[grade]
-                res = check_composite_beam(section, slab_t, slab_w, fck, M_ed, V_ed, span, steel)
-                if "error" in res:
-                    st.error(res["error"])
-                elif res["pass"]:
-                    st.success("Composite beam OK")
-                else:
-                    st.error("Composite beam fails")
-                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
-                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
-                st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
-                st.json(res)
+                if st.button("Save This Analysis", key="save_steel_beam"):
+                    save_analysis(username, "Steel Beam", {"inputs": {"section": section, "M_ed": M_ed, "V_ed": V_ed, "span": span}, "results": res})
+                    st.success("Analysis saved!")
 
     # ---- COLUMNS ----
     with tabs[1]:
@@ -1091,6 +1038,9 @@ elif page == "Structural Analysis":
                 else: st.error("Column fails")
                 st.write(f"N_Rd: {output_metric(res['N_rd'], 'force'):.1f} {unit_label('force')}")
                 st.json(res)
+                if st.button("Save This Analysis", key="save_col"):
+                    save_analysis(username, "RC Column", {"inputs": {"N_ed": N_ed, "M_ed": M_ed, "b": b, "h": h, "l0": l0, "fck": fck}, "results": res})
+                    st.success("Analysis saved!")
 
     # ---- SLABS ----
     with tabs[2]:
@@ -1315,14 +1265,9 @@ elif page == "Eurocodes":
                     table["Combination"].append(name)
                     table["Value"].append(f"{val:.2f}")
                 st.table(table)
-        else:
-            if st.button("Generate SLS Combinations", key="ec0_sls"):
-                combos = ec0.eurocode_sls_combinations(dead, live, wind, snow)
-                table = {"Combination": [], "Value": []}
-                for name, val in combos:
-                    table["Combination"].append(name)
-                    table["Value"].append(f"{val:.2f}")
-                st.table(table)
+                if st.button("Save Analysis", key="save_ec0"):
+                    save_analysis(username, "EN 1990 ULS", {"inputs": {"dead": dead, "live": live, "wind": wind, "snow": snow, "seismic": seismic}, "results": table})
+                    st.success("Saved!")
 
     # EN 1991 - Actions
     with euro_tabs[1]:
@@ -1364,6 +1309,9 @@ elif page == "Eurocodes":
             else:
                 st.error("RC beam fails per EN 1992")
             st.json(res)
+            if st.button("Save Analysis", key="save_ec2"):
+                save_analysis(username, "EN 1992 RC Beam", {"inputs": {"b": b, "h": h, "d": d, "fck": fck, "fyk": fyk, "M_ed": M_ed, "V_ed": V_ed, "span": span}, "results": res})
+                st.success("Saved!")
 
     # EN 1993 - Steel
     with euro_tabs[3]:
@@ -1384,6 +1332,9 @@ elif page == "Eurocodes":
             else:
                 st.error("Steel beam fails per EN 1993")
             st.json(res)
+            if st.button("Save Analysis", key="save_ec3"):
+                save_analysis(username, "EN 1993 Steel Beam", {"inputs": {"section": section, "fy": fy, "M_ed": M_ed, "V_ed": V_ed, "span": span, "buckling": buckling}, "results": res})
+                st.success("Saved!")
 
     # EN 1994 - Composite
     with euro_tabs[4]:
@@ -1407,6 +1358,9 @@ elif page == "Eurocodes":
             else:
                 st.error("Composite beam fails per EN 1994")
             st.json(res)
+            if st.button("Save Analysis", key="save_ec4"):
+                save_analysis(username, "EN 1994 Composite Beam", {"inputs": {"section": section, "slab_t": slab_t, "slab_w": slab_w, "fck": fck, "fy": fy, "M_ed": M_ed, "V_ed": V_ed, "span": span}, "results": res})
+                st.success("Saved!")
 
     # EN 1995 - Timber
     with euro_tabs[5]:
@@ -1428,6 +1382,9 @@ elif page == "Eurocodes":
             else:
                 st.error("Timber beam fails per EN 1995")
             st.json(res)
+            if st.button("Save Analysis", key="save_ec5"):
+                save_analysis(username, "EN 1995 Timber Beam", {"inputs": {"timber_class": timber_class, "b": b, "h": h, "M_ed": M_ed, "V_ed": V_ed, "span": span, "service_class": service_class, "load_duration": load_duration}, "results": res})
+                st.success("Saved!")
 
     # EN 1996 - Masonry
     with euro_tabs[6]:
