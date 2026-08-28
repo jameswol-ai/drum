@@ -687,13 +687,39 @@ if page == "Project Dashboard":
                     svg_content = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
                     st.download_button("Download SVG", svg_content, file_name=f"{building.name}_plan.svg", mime="image/svg+xml")
                 if st.button("📊 Export Summary PDF"):
-                    report_data = {"Project": building.name, "Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
-                                   "Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}"}
-                    filename, error = generate_analysis_report(report_data, f"{building.name}_summary.pdf")
-                    if not error:
-                        with open(filename, "rb") as f:
-                            st.download_button("Download PDF", f, file_name=filename, mime="application/pdf")
-                st.text_input("Shareable link (copy)", value=f"https://drum-studio.com/project/{building.id}", disabled=True)
+    # Build project data dict
+    project_data = {
+        "Project Name": building.name,
+        "Engineer": username,
+        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
+        "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
+    }
+    # Analysis results
+    analysis_results = {
+        "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
+        "Suggested Beam": integrity['suggested_beam'],
+        "Structural Integrity": "Pass" if integrity['pass'] else "Fail",
+    }
+    # Cost breakdown
+    cost = estimate_cost(plan)
+    cost_breakdown = {
+        "Concrete": cost["concrete"],
+        "Steel": cost["steel"],
+        "Glass": cost["glass"],
+        "Labor": cost["labor"],
+        "Total": cost["total"],
+    }
+    # Generate plan SVG for embedding
+    plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
+    filename, error = generate_pdf_report(project_data, plan_svg, analysis_results, cost_breakdown,
+                                          filename=f"{building.name}_report.pdf")
+    if error:
+        st.error(error)
+    else:
+        with open(filename, "rb") as f:
+            st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
+        st.success("Report generated!")
 
         else:
             st.info("👈 Select a project from the list or create a new one to start.")
