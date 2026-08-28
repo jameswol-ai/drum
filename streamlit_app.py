@@ -73,6 +73,7 @@ if "logged_in" not in st.session_state:
     st.session_state.show_dimensions = True
     st.session_state.saved_analyses = []
     st.session_state.current_analysis = None
+    st.session_state.project_name = ""
 
 if not load_users():
     admin_user = os.environ.get("DRUM_ADMIN_USER", "admin")
@@ -241,6 +242,13 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     font-size: 0.9rem;
     line-height: 1.5;
 }
+.project-header {
+    background: linear-gradient(135deg, #1E293B, #334155);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    border: 1px solid #3B82F6;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -334,7 +342,6 @@ def update_building_plan(building, mem, username):
     save_memory(username, mem)
 
 def generate_safe_plan(building, num_rooms=4, grid_spacing_mm=500):
-    """Generate a safe floor plan with all rooms within 800x500 bounds."""
     colors = [
         "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
         "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
@@ -509,8 +516,8 @@ with st.sidebar:
     st.caption(f"Role: {user_data.get('role', 'viewer')}")
     st.markdown("---")
     page = st.radio("Navigate",
-                    ["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives"],
-                    index=["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives"].index(st.session_state.page),
+                    ["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives", "Reports"],
+                    index=["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives", "Reports"].index(st.session_state.page) if st.session_state.page in ["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives", "Reports"] else 0,
                     key="nav_radio")
     st.session_state.page = page
     unit_choice = st.radio("Unit System", ["metric", "imperial"], index=0, key="unit_radio")
@@ -551,7 +558,6 @@ with st.sidebar:
                     except ValueError as e:
                         st.error(str(e))
 
-    # Saved Analyses
     saved = get_analyses(username)
     if saved:
         with st.expander(f"Saved Analyses ({len(saved)})"):
@@ -585,6 +591,14 @@ if page == "Project Dashboard":
         integrity = check_structural_integrity(plan)
         cost = estimate_cost(plan)
 
+        # Project Header
+        st.markdown(f"""
+        <div class="project-header">
+            <h2 style="margin:0; color:#F8FAFC;">{building.name}</h2>
+            <p style="margin:5px 0 0 0; color:#94A3B8;">Created: {building.created_at[:10]} | Score: {building.score}</p>
+        </div>
+        """, unsafe_allow_html=True)
+
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric("Area", f"{output_metric(area, 'area'):.1f} {unit_label('area')}")
         col_m2.metric("Design Load", f"{output_metric(load, 'force'):.1f} {unit_label('force')}")
@@ -605,16 +619,21 @@ if page == "Project Dashboard":
     with left_col:
         st.markdown("### Project Tools")
         if is_engineer(user_data):
-            if st.button("New Project", use_container_width=True):
-                new_building = Building(name=f"Project-{len(mem['buildings'])+1}", score=50)
-                generate_safe_plan(new_building, num_rooms=4, grid_spacing_mm=500)
-                mem["buildings"].append(new_building.to_dict())
-                st.session_state.active_building = new_building
-                st.session_state.show_grid = True
-                st.session_state.grid_spacing_mm = 500
-                log_event(username, mem, f"Created new project: {new_building.name}")
-                save_memory(username, mem)
-                st.rerun()
+            project_name = st.text_input("Project Name", value=st.session_state.project_name, key="project_name_input")
+            st.session_state.project_name = project_name
+            if st.button("Create Project", use_container_width=True):
+                if project_name.strip() == "":
+                    st.error("Please enter a project name.")
+                else:
+                    new_building = Building(name=project_name, score=50)
+                    generate_safe_plan(new_building, num_rooms=4, grid_spacing_mm=500)
+                    mem["buildings"].append(new_building.to_dict())
+                    st.session_state.active_building = new_building
+                    st.session_state.show_grid = True
+                    st.session_state.grid_spacing_mm = 500
+                    log_event(username, mem, f"Created project: {new_building.name}")
+                    save_memory(username, mem)
+                    st.rerun()
         else:
             st.info("Viewer access – editing disabled.")
 
@@ -908,60 +927,18 @@ if page == "Project Dashboard":
                                        f"${cost['total']:,.2f}"]
                     })
 
-            st.markdown("---")
-            with st.expander("Export & Share", expanded=False):
-                if st.button("Download Plan as SVG"):
-                    svg_content = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
-                    st.download_button("Download SVG", svg_content, file_name=f"{building.name}_plan.svg", mime="image/svg+xml")
-                if st.button("Export Summary PDF"):
-                    project_data = {
-                        "Project Name": building.name,
-                        "Engineer": username,
-                        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
-                        "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
-                    }
-                    analysis_results = {
-                        "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
-                        "Suggested Beam": integrity['suggested_beam'],
-                        "Structural Integrity": "Pass" if integrity['pass'] else "Fail",
-                    }
-                    cost = estimate_cost(plan)
-                    cost_breakdown = {
-                        "Concrete": cost["concrete"],
-                        "Steel": cost["steel"],
-                        "Glass": cost["glass"],
-                        "Labor": cost["labor"],
-                        "Total": cost["total"],
-                    }
-                    plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
-                    filename, error = generate_pdf_report(project_data, plan_svg, analysis_results, cost_breakdown,
-                                                          filename=f"{building.name}_report.pdf")
-                    if error:
-                        st.error(error)
-                    else:
-                        with open(filename, "rb") as f:
-                            st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
-                        st.success("Report generated!")
-                st.text_input("Shareable link (copy)", value=f"https://drum-studio.com/project/{building.id}", disabled=True)
-
         else:
             st.info("Select a project from the list or create a new one to start.")
 
-    st.markdown("---")
-    st.subheader("Recent Activity")
-    if mem["logs"]:
-        for log in reversed(mem["logs"][-5:]):
-            st.caption(f"{log['time'][11:19]} – {log['msg']}")
-    else:
-        st.caption("No activity yet.")
-
 # ======================
-# PAGE: STRUCTURAL ANALYSIS
+# PAGE: STRUCTURAL ANALYSIS (Simplified)
 # ======================
 elif page == "Structural Analysis":
     st.title("Structural Analysis Workstation")
     st.caption("Simplified checks for quick analysis.")
+
+    if st.session_state.active_building:
+        st.info(f"Active Project: **{st.session_state.active_building.name}**")
 
     def ui_number_input(label, min_val, max_val, value, step, key, unit_type):
         display_min = output_metric(min_val, unit_type) if st.session_state.unit_system=="imperial" else min_val
@@ -1236,18 +1213,21 @@ elif page == "Structural Analysis":
             st.metric("Seismic response coefficient Cs", f"{res['Cs']:.4f}")
 
 # ======================
-# PAGE: EUROCODES
+# PAGE: EUROCODES (Detailed)
 # ======================
 elif page == "Eurocodes":
     st.title("Eurocode Design Modules")
     st.caption("Detailed design per European Standards (EN 1990 – EN 1999)")
+
+    if st.session_state.active_building:
+        st.info(f"Active Project: **{st.session_state.active_building.name}**")
 
     euro_tabs = st.tabs([
         "EN 1990", "EN 1991", "EN 1992", "EN 1993", "EN 1994",
         "EN 1995", "EN 1996", "EN 1997", "EN 1998", "EN 1999"
     ])
 
-    # EN 1990 - Load Combinations
+    # EN 1990
     with euro_tabs[0]:
         st.subheader("EN 1990 – Load Combinations")
         code_type = st.radio("Combination type", ["ULS", "SLS"], key="ec0_type")
@@ -1269,23 +1249,14 @@ elif page == "Eurocodes":
                     save_analysis(username, "EN 1990 ULS", {"inputs": {"dead": dead, "live": live, "wind": wind, "snow": snow, "seismic": seismic}, "results": table})
                     st.success("Saved!")
 
-    # EN 1991 - Actions
+    # EN 1991
     with euro_tabs[1]:
         st.subheader("EN 1991 – Actions on Structures")
         building_type = st.selectbox("Building type", ["residential", "office", "assembly", "retail", "storage", "industrial"], key="ec1_btype")
         imposed = ec1.en1991_imposed_loads(building_type)
         st.metric(f"Imposed load ({building_type})", f"{imposed} kN/m²")
-        st.markdown("---")
-        altitude = st.number_input("Altitude (m)", 0, 3000, 0, key="ec1_alt")
-        snow = ec1.en1991_snow_load(altitude_m=altitude)
-        st.metric("Snow load", f"{snow:.2f} kN/m²")
-        st.markdown("---")
-        wind_speed = st.number_input("Basic wind speed (m/s)", 10, 50, 25, key="ec1_wind")
-        terrain = st.selectbox("Terrain category", ["0", "I", "II", "III", "IV"], key="ec1_terrain")
-        wind_pressure = ec1.en1991_wind_load(wind_speed, terrain)
-        st.metric("Wind pressure", f"{wind_pressure:.2f} kPa")
 
-    # EN 1992 - Concrete
+    # EN 1992
     with euro_tabs[2]:
         st.subheader("EN 1992 – Concrete Structures")
         col1, col2 = st.columns(2)
@@ -1313,7 +1284,7 @@ elif page == "Eurocodes":
                 save_analysis(username, "EN 1992 RC Beam", {"inputs": {"b": b, "h": h, "d": d, "fck": fck, "fyk": fyk, "M_ed": M_ed, "V_ed": V_ed, "span": span}, "results": res})
                 st.success("Saved!")
 
-    # EN 1993 - Steel
+    # EN 1993
     with euro_tabs[3]:
         st.subheader("EN 1993 – Steel Structures")
         section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300", "IPE 400", "IPE 500"], key="ec3_section")
@@ -1336,7 +1307,7 @@ elif page == "Eurocodes":
                 save_analysis(username, "EN 1993 Steel Beam", {"inputs": {"section": section, "fy": fy, "M_ed": M_ed, "V_ed": V_ed, "span": span, "buckling": buckling}, "results": res})
                 st.success("Saved!")
 
-    # EN 1994 - Composite
+    # EN 1994
     with euro_tabs[4]:
         st.subheader("EN 1994 – Composite Structures")
         section = st.selectbox("Steel Section", ["IPE 160", "IPE 220", "IPE 300"], key="ec4_section")
@@ -1358,11 +1329,8 @@ elif page == "Eurocodes":
             else:
                 st.error("Composite beam fails per EN 1994")
             st.json(res)
-            if st.button("Save Analysis", key="save_ec4"):
-                save_analysis(username, "EN 1994 Composite Beam", {"inputs": {"section": section, "slab_t": slab_t, "slab_w": slab_w, "fck": fck, "fy": fy, "M_ed": M_ed, "V_ed": V_ed, "span": span}, "results": res})
-                st.success("Saved!")
 
-    # EN 1995 - Timber
+    # EN 1995
     with euro_tabs[5]:
         st.subheader("EN 1995 – Timber Structures")
         timber_class = st.selectbox("Timber class", list(TIMBER_CLASSES.keys()), key="ec5_class")
@@ -1382,11 +1350,8 @@ elif page == "Eurocodes":
             else:
                 st.error("Timber beam fails per EN 1995")
             st.json(res)
-            if st.button("Save Analysis", key="save_ec5"):
-                save_analysis(username, "EN 1995 Timber Beam", {"inputs": {"timber_class": timber_class, "b": b, "h": h, "M_ed": M_ed, "V_ed": V_ed, "span": span, "service_class": service_class, "load_duration": load_duration}, "results": res})
-                st.success("Saved!")
 
-    # EN 1996 - Masonry
+    # EN 1996
     with euro_tabs[6]:
         st.subheader("EN 1996 – Masonry Structures")
         wall_t = st.number_input("Wall thickness (mm)", 100, 500, 215, key="ec6_t")
@@ -1403,10 +1368,9 @@ elif page == "Eurocodes":
                 st.error("Masonry wall fails per EN 1996")
             st.json(res)
 
-    # EN 1997 - Geotechnical
+    # EN 1997
     with euro_tabs[7]:
         st.subheader("EN 1997 – Geotechnical Design")
-        st.markdown("**Shallow Foundation**")
         load = st.number_input("Column load (kN)", 100.0, 10000.0, 500.0, key="ec7_load")
         bearing = st.number_input("Bearing capacity (kPa)", 50.0, 500.0, 150.0, key="ec7_bearing")
         if st.button("Size Footing (EN 1997)", key="ec7_footing"):
@@ -1415,20 +1379,8 @@ elif page == "Eurocodes":
                 st.error(res["error"])
             else:
                 st.success(f"Footing side: {res['side_m']:.2f} m")
-        st.markdown("---")
-        st.markdown("**Pile Capacity**")
-        dia = st.number_input("Pile diameter (m)", 0.3, 2.0, 0.6, key="ec7_dia")
-        length = st.number_input("Pile length (m)", 5.0, 40.0, 15.0, key="ec7_len")
-        soil = st.selectbox("Soil type", ["sand", "clay"], key="ec7_soil")
-        N = st.number_input("SPT N-value", 5, 60, 20, key="ec7_N")
-        if st.button("Calculate Pile Capacity (EN 1997)", key="ec7_pile"):
-            res = ec7.en1997_pile_capacity(dia, length, soil, N)
-            if "error" in res:
-                st.error(res["error"])
-            else:
-                st.metric("Allowable Capacity", f"{res['Q_all_kN']:.1f} kN")
 
-    # EN 1998 - Seismic
+    # EN 1998
     with euro_tabs[8]:
         st.subheader("EN 1998 – Seismic Design")
         W = st.number_input("Seismic weight (kN)", 100.0, 10000.0, 1000.0, key="ec8_W")
@@ -1440,16 +1392,15 @@ elif page == "Eurocodes":
             res = ec8.en1998_base_shear(W, ag, soil_class, q_factor, T)
             st.metric("Base Shear", f"{res['V_base_kN']:.1f} kN")
 
-    # EN 1999 - Aluminium
+    # EN 1999
     with euro_tabs[9]:
         st.subheader("EN 1999 – Aluminium Structures")
         alloy = st.selectbox("Alloy", ["6082-T6", "6061-T6", "7075-T6"], key="ec9_alloy")
         W = st.number_input("Section modulus (mm³)", 10000, 1000000, 100000, key="ec9_W")
         M_ed = st.number_input("Design moment (kNm)", 10.0, 500.0, 50.0, key="ec9_Med")
-        V_ed = st.number_input("Design shear (kN)", 5.0, 200.0, 20.0, key="ec9_Ved")
         span = st.number_input("Span (m)", 1.0, 20.0, 5.0, key="ec9_span")
         if st.button("Check Aluminium Beam (EN 1999)", key="ec9_beam"):
-            res = ec9.en1999_aluminium_beam_design(alloy, W, M_ed, V_ed, span)
+            res = ec9.en1999_aluminium_beam_design(alloy, W, M_ed, 20.0, span)
             if "error" in res:
                 st.error(res["error"])
             elif res["pass"]:
@@ -1457,6 +1408,76 @@ elif page == "Eurocodes":
             else:
                 st.error("Aluminium beam fails per EN 1999")
             st.json(res)
+
+# ======================
+# PAGE: REPORTS
+# ======================
+elif page == "Reports":
+    st.title("Project Reports")
+    st.caption("Generate comprehensive reports for your projects")
+
+    if st.session_state.active_building:
+        building = st.session_state.active_building
+        plan = building.plan
+        area = calculate_total_area(plan)
+        load = compute_floor_loads(plan,
+            live_load_kN_per_m2=st.session_state.eng_params["live_load"],
+            slab_thickness_m=st.session_state.eng_params["slab_thickness"],
+            additional_dead_load_kN_per_m2=st.session_state.eng_params["additional_dead"])
+        integrity = check_structural_integrity(plan)
+        cost = estimate_cost(plan)
+
+        st.markdown(f"### {building.name} – Report")
+
+        # Project summary
+        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
+        col_r1.metric("Total Area", f"{output_metric(area, 'area'):.1f} {unit_label('area')}")
+        col_r2.metric("Design Load", f"{output_metric(load, 'force'):.1f} {unit_label('force')}")
+        col_r3.metric("Max Span", f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}")
+        col_r4.metric("Est. Cost", f"${cost['total']:,.0f}")
+
+        # Plan
+        st.markdown("#### Floor Plan")
+        svg_str = generate_svg_string(plan, show_grid=True, grid_spacing_mm=500, show_north=True, show_dimensions=True)
+        st.markdown(f'<div style="background:#0F172A; border-radius:12px; padding:8px; border:1px solid #334155;">{svg_str}</div>', unsafe_allow_html=True)
+
+        # Saved analyses for this project
+        saved = get_analyses(username)
+        if saved:
+            st.markdown("#### Saved Analyses")
+            for a in saved:
+                with st.expander(f"{a['type']} – {a['created_at'][:10]}"):
+                    st.json(a['data'])
+
+        # Generate PDF
+        if st.button("Generate Full Report PDF"):
+            project_data = {
+                "Project Name": building.name,
+                "Engineer": username,
+                "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
+                "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
+                "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
+                "Suggested Beam": integrity['suggested_beam'],
+            }
+            cost_breakdown = {
+                "Concrete": cost["concrete"],
+                "Steel": cost["steel"],
+                "Glass": cost["glass"],
+                "Labor": cost["labor"],
+                "Total": cost["total"],
+            }
+            plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
+            filename, error = generate_pdf_report(project_data, plan_svg, None, cost_breakdown,
+                                                  filename=f"{building.name}_report.pdf")
+            if error:
+                st.error(error)
+            else:
+                with open(filename, "rb") as f:
+                    st.download_button("Download Full Report", f, file_name=filename, mime="application/pdf")
+                st.success("Report generated!")
+    else:
+        st.info("No active project. Please select a project from the dashboard.")
 
 # ======================
 # PAGE: ARCHIVES
