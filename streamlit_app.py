@@ -188,16 +188,32 @@ if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
-        st.markdown("<h1 style='text-align:center;'>DRUM Studio</h1>", unsafe_allow_html=True)
+        st.markdown("""
+        <div style="text-align:center; margin-bottom:10px;">
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="80" height="80" rx="16" fill="url(#p0)"/>
+                <path d="M24 56V32L40 24L56 32V56L40 64L24 56Z" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="40" cy="44" r="6" fill="white"/>
+                <path d="M40 36V28" stroke="white" stroke-width="3"/>
+                <defs>
+                    <linearGradient id="p0" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+                        <stop stop-color="#3B82F6"/>
+                        <stop offset="1" stop-color="#2563EB"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align:center; font-weight:700; margin-bottom:0;'>DRUM Studio</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center; color:#94A3B8;'>Structural Member Analysis Platform</p>", unsafe_allow_html=True)
         with st.form("auth_form", clear_on_submit=True):
-            uname = st.text_input("Username")
-            pwd = st.text_input("Password", type="password")
+            uname = st.text_input("Username", placeholder="Enter username")
+            pwd = st.text_input("Password", type="password", placeholder="Enter password")
             col1_btn, col2_btn = st.columns(2)
             with col1_btn:
-                login_btn = st.form_submit_button("🔑 Login", use_container_width=True)
+                login_btn = st.form_submit_button("Login", use_container_width=True)
             with col2_btn:
-                register_btn = st.form_submit_button("✨ Register", use_container_width=True)
+                register_btn = st.form_submit_button("Register", use_container_width=True)
             if login_btn:
                 user = authenticate(uname, pwd)
                 if user:
@@ -225,7 +241,26 @@ user_data = st.session_state.user_data
 mem = st.session_state.memory
 
 with st.sidebar:
-    st.markdown("### DRUM Studio")
+    st.markdown("""
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px; justify-content: center;">
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="40" height="40" rx="8" fill="url(#paint0_linear)"/>
+            <path d="M12 28V16L20 12L28 16V28L20 32L12 28Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="20" cy="22" r="3" fill="white"/>
+            <path d="M20 18V14" stroke="white" stroke-width="2"/>
+            <defs>
+                <linearGradient id="paint0_linear" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#3B82F6"/>
+                    <stop offset="1" stop-color="#2563EB"/>
+                </linearGradient>
+            </defs>
+        </svg>
+        <div>
+            <div style="font-weight: 700; font-size: 1.3rem; color: #F8FAFC; line-height: 1.2;">DRUM</div>
+            <div style="font-size: 0.7rem; color: #94A3B8; letter-spacing: 1px;">STUDIO</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown(f"**{username}** ({user_data.get('role', 'viewer')})")
     st.markdown("---")
     page = st.radio("Navigate",
@@ -306,7 +341,6 @@ if page == "Projects":
                         delete_project(username, p.id)
                         st.rerun()
 
-                # Drawings
                 st.markdown("**Drawings**")
                 drawings = get_drawings(username, p.id)
                 if drawings:
@@ -333,7 +367,6 @@ if page == "Projects":
                             st.success("Drawing added!")
                             st.rerun()
 
-                # Members
                 st.markdown("**Members**")
                 members = get_members(username, p.id)
                 if members:
