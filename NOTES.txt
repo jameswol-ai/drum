@@ -32,3 +32,40 @@ drum/
 ├── eurocodes.py      ← This file was missing
 ├── requirements.txt
 └── README.md
+
+
+
+drum/
+├── streamlit_app.py
+├── main.py
+├── requirements.txt
+├── engineering/
+│   ├── __init__.py
+│   ├── materials.py
+│   ├── beams.py
+│   ├── columns.py
+│   ├── slabs.py
+│   ├── foundations.py
+│   ├── walls.py
+│   ├── piles.py
+│   ├── prestressed.py
+│   ├── retaining.py
+│   ├── truss.py
+│   ├── connections.py
+│   ├── seismic.py
+│   ├── load_combinations.py
+│   ├── cost.py
+│   ├── pdf_report.py
+│   └── visualization.py
+├── eurocodes/
+│   ├── __init__.py
+│   ├── en1990.py
+│   ├── en1991.py
+│   ├── en1992.py
+│   ├── en1993.py
+│   ├── en1994.py
+│   ├── en1995.py
+│   ├── en1996.py
+│   ├── en1997.py
+│   ├── en1998.py
+│   └── en1999.py
