@@ -217,3 +217,42 @@ def simulate_evolution(building):
 
 def generate_rhythm():
     return "♩♪♫"
+
+# ---------- User Management (Roles & Permissions) ----------
+def list_users():
+    """Return list of all users (dicts with username, role)."""
+    users = load_users()
+    return [{"username": u, "role": data.get("role", "viewer")} for u, data in users.items()]
+
+def update_user_role(username, new_role):
+    """Change user's role."""
+    allowed_roles = {"admin", "engineer", "viewer"}
+    if new_role not in allowed_roles:
+        raise ValueError(f"Role must be one of {allowed_roles}")
+    users = load_users()
+    if username not in users:
+        raise ValueError("User not found")
+    users[username]["role"] = new_role
+    save_users(users)
+
+def delete_user(username):
+    """Delete a user (prevent deleting the last admin)."""
+    users = load_users()
+    if username not in users:
+        return False
+    # Ensure at least one admin remains
+    if users[username]["role"] == "admin":
+        admin_count = sum(1 for u in users.values() if u.get("role") == "admin")
+        if admin_count <= 1:
+            raise ValueError("Cannot delete the last admin account")
+    del users[username]
+    save_users(users)
+    return True
+
+def is_admin(user_data):
+    """Return True if user is admin."""
+    return user_data and user_data.get("role") == "admin"
+
+def is_engineer(user_data):
+    """Return True if user is engineer or admin."""
+    return user_data and user_data.get("role") in ("admin", "engineer")
