@@ -136,20 +136,6 @@ h1, h2, h3 {{ color: {text_color}; font-weight: 600; }}
 .news-title {{ font-weight: 600; color: {text_color}; }}
 .news-date {{ color: #94A3B8; font-size: 0.8rem; }}
 .news-summary {{ color: {text_color}; font-size: 0.9rem; }}
-.project-header {{
-    background: linear-gradient(135deg, {card_bg}, {border_color});
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 20px;
-    border: 1px solid #3B82F6;
-}}
-.member-card {{
-    background: {card_bg};
-    border: 1px solid {border_color};
-    border-radius: 10px;
-    padding: 12px;
-    margin-bottom: 8px;
-}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -251,7 +237,7 @@ with st.sidebar:
 
     with st.expander("Appearance"):
         current_theme = get_theme(username)
-        new_theme = st.radio("Theme", ["dark", "light"], index=0 if current_theme == "dark" else 1)
+        new_theme = st.radio("Theme", ["dark", "light"], index=0 if current_theme == "dark" else 1, key="theme_radio")
         if new_theme != current_theme:
             update_theme(username, new_theme)
             st.rerun()
@@ -268,7 +254,7 @@ with st.sidebar:
                     update_user_role(u["username"], new_role)
                     st.rerun()
 
-    if st.button("Logout"):
+    if st.button("Logout", key="logout_btn"):
         save_memory(username, mem)
         for key in list(st.session_state.keys()):
             del st.session_state[key]
@@ -280,15 +266,15 @@ if page == "Projects":
 
     if is_engineer(user_data):
         with st.expander("Create New Project", expanded=False):
-            project_name = st.text_input("Project Name")
-            project_desc = st.text_area("Description")
+            project_name = st.text_input("Project Name", key="new_proj_name")
+            project_desc = st.text_area("Description", key="new_proj_desc")
             col_p1, col_p2 = st.columns(2)
-            project_type = col_p1.selectbox("Type", ["building", "bridge", "tower", "industrial", "other"])
-            project_level = col_p2.selectbox("Level", ["substructure", "superstructure"])
-            if st.button("Create Project", use_container_width=True):
+            project_type = col_p1.selectbox("Type", ["building", "bridge", "tower", "industrial", "other"], key="new_proj_type")
+            project_level = col_p2.selectbox("Level", ["substructure", "superstructure"], key="new_proj_level")
+            if st.button("Create Project", key="create_proj_btn", use_container_width=True):
                 if project_name.strip():
                     create_project(username, project_name, project_desc, project_type, project_level)
-                    st.success(f"Project created!")
+                    st.success("Project created!")
                     st.rerun()
                 else:
                     st.error("Enter a project name.")
@@ -383,16 +369,14 @@ elif page == "Structural Analysis":
         st.info("Create a project first.")
     else:
         project_names = [p.name for p in projects]
-        selected_project = st.selectbox("Select Project", project_names)
+        selected_project = st.selectbox("Select Project", project_names, key="sa_project")
         project = next(p for p in projects if p.name == selected_project)
-        st.session_state.active_project = project
 
         members = get_members(username, project.id)
         if members:
             member_names = [m['name'] for m in members]
-            selected_member = st.selectbox("Select Member", member_names)
+            selected_member = st.selectbox("Select Member", member_names, key="sa_member")
             member = next(m for m in members if m['name'] == selected_member)
-            st.session_state.active_member = member
 
             st.markdown(f"### {member['name']} ({member['type']}, {member.get('level','superstructure')})")
 
@@ -404,54 +388,54 @@ elif page == "Structural Analysis":
 
             with tabs[0]:
                 st.subheader("Beam Design")
-                beam_mat = st.selectbox("Material", ["RC", "Steel", "Timber", "Composite"], key="beam_mat")
+                beam_mat = st.selectbox("Material", ["RC", "Steel", "Timber", "Composite"], key="beam_mat_sa")
                 if beam_mat == "RC":
-                    grade = st.selectbox("Concrete Grade", list(CONCRETE_GRADES.keys()))
-                    b = st.number_input("Width (mm)", 100, 1000, 300)
-                    h = st.number_input("Height (mm)", 200, 2000, 500)
-                    span = st.number_input("Span (m)", 1.0, 30.0, 6.0)
-                    M_ed = st.number_input("Moment (kNm)", 10.0, 1000.0, 120.0)
-                    V_ed = st.number_input("Shear (kN)", 10.0, 500.0, 80.0)
-                    if st.button("Analyze RC Beam"):
+                    grade = st.selectbox("Concrete Grade", list(CONCRETE_GRADES.keys()), key="rc_grade_sa")
+                    b = st.number_input("Width (mm)", 100, 1000, 300, key="rc_b_sa")
+                    h = st.number_input("Height (mm)", 200, 2000, 500, key="rc_h_sa")
+                    span = st.number_input("Span (m)", 1.0, 30.0, 6.0, key="rc_span_sa")
+                    M_ed = st.number_input("Moment (kNm)", 10.0, 1000.0, 120.0, key="rc_Med_sa")
+                    V_ed = st.number_input("Shear (kN)", 10.0, 500.0, 80.0, key="rc_Ved_sa")
+                    if st.button("Analyze RC Beam", key="analyze_rc_beam_sa"):
                         fck = CONCRETE_GRADES[grade]["fck"]
                         res = check_rc_beam(b, h, h-50, fck, M_ed, V_ed, span)
                         st.json(res)
                         if res["pass"]: st.success("Beam OK")
                         else: st.error("Beam fails")
-                        if st.button("Save to Member"):
+                        if st.button("Save to Member", key="save_rc_beam_sa"):
                             add_member_analysis(username, project.id, member['id'], "RC Beam", res)
                             st.success("Saved!")
                 elif beam_mat == "Steel":
-                    section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"])
-                    span = st.number_input("Span (m)", 2.0, 20.0, 6.0)
-                    M_ed = st.number_input("Moment (kNm)", 50.0, 1000.0, 100.0)
-                    V_ed = st.number_input("Shear (kN)", 20.0, 500.0, 50.0)
-                    if st.button("Analyze Steel Beam"):
+                    section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="steel_section_sa")
+                    span = st.number_input("Span (m)", 2.0, 20.0, 6.0, key="steel_span_sa")
+                    M_ed = st.number_input("Moment (kNm)", 50.0, 1000.0, 100.0, key="steel_Med_sa")
+                    V_ed = st.number_input("Shear (kN)", 20.0, 500.0, 50.0, key="steel_Ved_sa")
+                    if st.button("Analyze Steel Beam", key="analyze_steel_beam_sa"):
                         steel = {"fy": 355, "E": 210e3}
                         res = check_steel_beam(section, M_ed, V_ed, span, steel)
                         st.json(res)
                         if res["pass"]: st.success("Beam OK")
                         else: st.error("Beam fails")
                 elif beam_mat == "Timber":
-                    timber_class = st.selectbox("Timber Class", list(TIMBER_CLASSES.keys()))
-                    b = st.number_input("Width (mm)", 50, 400, 100)
-                    h = st.number_input("Depth (mm)", 100, 600, 300)
-                    span = st.number_input("Span (m)", 1.0, 15.0, 5.0)
-                    M_ed = st.number_input("Moment (kNm)", 5.0, 200.0, 30.0)
-                    V_ed = st.number_input("Shear (kN)", 1.0, 100.0, 20.0)
-                    if st.button("Analyze Timber Beam"):
+                    timber_class = st.selectbox("Timber Class", list(TIMBER_CLASSES.keys()), key="timber_class_sa")
+                    b = st.number_input("Width (mm)", 50, 400, 100, key="timber_b_sa")
+                    h = st.number_input("Depth (mm)", 100, 600, 300, key="timber_h_sa")
+                    span = st.number_input("Span (m)", 1.0, 15.0, 5.0, key="timber_span_sa")
+                    M_ed = st.number_input("Moment (kNm)", 5.0, 200.0, 30.0, key="timber_Med_sa")
+                    V_ed = st.number_input("Shear (kN)", 1.0, 100.0, 20.0, key="timber_Ved_sa")
+                    if st.button("Analyze Timber Beam", key="analyze_timber_beam_sa"):
                         res = check_timber_beam(timber_class, b, h, M_ed, V_ed, span)
                         st.json(res)
                         if res["pass"]: st.success("Beam OK")
                         else: st.error("Beam fails")
                 elif beam_mat == "Composite":
-                    section = st.selectbox("Steel Section", ["IPE 160", "IPE 220", "IPE 300"])
-                    slab_t = st.number_input("Slab thickness (mm)", 50, 200, 120)
-                    slab_w = st.number_input("Slab width (mm)", 500, 3000, 1500)
-                    M_ed = st.number_input("Moment (kNm)", 50.0, 1000.0, 200.0)
-                    V_ed = st.number_input("Shear (kN)", 20.0, 500.0, 100.0)
-                    span = st.number_input("Span (m)", 2.0, 20.0, 8.0)
-                    if st.button("Analyze Composite Beam"):
+                    section = st.selectbox("Steel Section", ["IPE 160", "IPE 220", "IPE 300"], key="comp_section_sa")
+                    slab_t = st.number_input("Slab thickness (mm)", 50, 200, 120, key="comp_slabt_sa")
+                    slab_w = st.number_input("Slab width (mm)", 500, 3000, 1500, key="comp_slabw_sa")
+                    M_ed = st.number_input("Moment (kNm)", 50.0, 1000.0, 200.0, key="comp_Med_sa")
+                    V_ed = st.number_input("Shear (kN)", 20.0, 500.0, 100.0, key="comp_Ved_sa")
+                    span = st.number_input("Span (m)", 2.0, 20.0, 8.0, key="comp_span_sa")
+                    if st.button("Analyze Composite Beam", key="analyze_comp_beam_sa"):
                         steel = {"fy": 355, "E": 210e3}
                         res = check_composite_beam(section, slab_t, slab_w, 30, M_ed, V_ed, span, steel)
                         st.json(res)
@@ -460,76 +444,79 @@ elif page == "Structural Analysis":
 
             with tabs[1]:
                 st.subheader("Column Design")
-                N_ed = st.number_input("Axial Load (kN)", 100.0, 5000.0, 500.0)
-                M_ed = st.number_input("Moment (kNm)", 0.0, 500.0, 20.0)
-                b = st.number_input("Width (mm)", 200, 1000, 300)
-                h = st.number_input("Depth (mm)", 200, 1000, 300)
-                l0 = st.number_input("Effective Length (m)", 2.0, 10.0, 3.0)
-                if st.button("Analyze Column"):
+                N_ed = st.number_input("Axial Load (kN)", 100.0, 5000.0, 500.0, key="col_Ned_sa")
+                M_ed = st.number_input("Moment (kNm)", 0.0, 500.0, 20.0, key="col_Med_sa")
+                b = st.number_input("Width (mm)", 200, 1000, 300, key="col_b_sa")
+                h = st.number_input("Depth (mm)", 200, 1000, 300, key="col_h_sa")
+                l0 = st.number_input("Effective Length (m)", 2.0, 10.0, 3.0, key="col_l0_sa")
+                if st.button("Analyze Column", key="analyze_col_sa"):
                     res = check_rc_column(N_ed, M_ed, b, h, 30, l0)
                     st.json(res)
                     if res["pass"]: st.success("Column OK")
                     else: st.error("Column fails")
+                    if st.button("Save to Member", key="save_col_sa"):
+                        add_member_analysis(username, project.id, member['id'], "Column", res)
+                        st.success("Saved!")
 
             with tabs[2]:
                 st.subheader("Slab Thickness")
-                span = st.number_input("Span (m)", 2.0, 15.0, 5.0)
-                support = st.selectbox("Support", ["simply_supported", "continuous"])
+                span = st.number_input("Span (m)", 2.0, 15.0, 5.0, key="slab_span_sa")
+                support = st.selectbox("Support", ["simply_supported", "continuous"], key="slab_support_sa")
                 t = slab_thickness_estimate(span, support)
                 st.success(f"Thickness: {t*1000:.0f} mm")
 
             with tabs[3]:
                 st.subheader("Footing Sizing")
-                load = st.number_input("Load (kN)", 100.0, 10000.0, 500.0)
-                bearing = st.number_input("Bearing (kPa)", 50.0, 500.0, 150.0)
-                if st.button("Size Footing"):
+                load = st.number_input("Load (kN)", 100.0, 10000.0, 500.0, key="fdn_load_sa")
+                bearing = st.number_input("Bearing (kPa)", 50.0, 500.0, 150.0, key="fdn_bearing_sa")
+                if st.button("Size Footing", key="size_fdn_sa"):
                     res = foundation_size(bearing, load)
                     if "error" in res: st.error(res["error"])
                     else: st.success(f"Side: {res['side_m']:.2f} m")
 
             with tabs[4]:
                 st.subheader("Pile Capacity")
-                dia = st.number_input("Diameter (m)", 0.3, 2.0, 0.6)
-                length = st.number_input("Length (m)", 5.0, 40.0, 15.0)
-                soil = st.selectbox("Soil", ["sand", "clay"])
-                N = st.number_input("SPT N", 5, 60, 20)
-                if st.button("Calculate"):
+                dia = st.number_input("Diameter (m)", 0.3, 2.0, 0.6, key="pile_dia_sa")
+                length = st.number_input("Length (m)", 5.0, 40.0, 15.0, key="pile_len_sa")
+                soil = st.selectbox("Soil", ["sand", "clay"], key="pile_soil_sa")
+                N = st.number_input("SPT N", 5, 60, 20, key="pile_N_sa")
+                if st.button("Calculate Capacity", key="calc_pile_sa"):
                     res = pile_capacity(dia, length, soil, N)
                     st.metric("Allowable Capacity", f"{res['Q_all_kN']:.1f} kN")
 
             with tabs[5]:
                 st.subheader("Prestressed Beam")
-                M_ext = st.number_input("Moment (kNm)", 100.0, 5000.0, 500.0)
-                P = st.number_input("Prestress (kN)", 100.0, 5000.0, 1000.0)
-                e = st.number_input("Eccentricity (m)", 0.0, 1.0, 0.2)
-                A = st.number_input("Area (m²)", 0.05, 2.0, 0.3)
-                I = st.number_input("I (m⁴)", 0.001, 0.2, 0.01)
-                if st.button("Check"):
+                M_ext = st.number_input("Moment (kNm)", 100.0, 5000.0, 500.0, key="pre_M_sa")
+                P = st.number_input("Prestress (kN)", 100.0, 5000.0, 1000.0, key="pre_P_sa")
+                e = st.number_input("Eccentricity (m)", 0.0, 1.0, 0.2, key="pre_e_sa")
+                A = st.number_input("Area (m²)", 0.05, 2.0, 0.3, key="pre_A_sa")
+                I = st.number_input("I (m⁴)", 0.001, 0.2, 0.01, key="pre_I_sa")
+                if st.button("Check Stresses", key="check_pre_sa"):
                     res = check_prestressed_beam(M_ext, P, e, A, I, 0.5, 0.5, 35)
                     if res["pass"]: st.success("OK")
                     else: st.error("Fails")
 
             with tabs[6]:
                 st.subheader("Truss Solver")
-                n_nodes = st.number_input("Nodes", 2, 10, 3)
-                n_elem = st.number_input("Elements", 1, 20, 2)
+                n_nodes = st.number_input("Nodes", 2, 10, 3, key="truss_n_sa")
+                n_elem = st.number_input("Elements", 1, 20, 2, key="truss_e_sa")
                 nodes = {}
                 for i in range(int(n_nodes)):
                     c1, c2 = st.columns(2)
-                    x = c1.number_input(f"N{i+1} X", value=0.0, key=f"tn_{i}_x")
-                    y = c2.number_input(f"N{i+1} Y", value=0.0, key=f"tn_{i}_y")
+                    x = c1.number_input(f"N{i+1} X", value=0.0, key=f"tn_{i}_x_sa")
+                    y = c2.number_input(f"N{i+1} Y", value=0.0, key=f"tn_{i}_y_sa")
                     nodes[i+1] = (x, y)
                 elements = []
                 for i in range(int(n_elem)):
                     c1, c2, c3, c4 = st.columns(4)
-                    n1 = c1.number_input(f"E{i+1} N1", 1, n_nodes, 1, key=f"te_{i}_n1")
-                    n2 = c2.number_input(f"E{i+1} N2", 1, n_nodes, 2, key=f"te_{i}_n2")
-                    E = c3.number_input(f"E{i+1} E", value=200000.0, key=f"te_{i}_E")
-                    A = c4.number_input(f"E{i+1} A", value=1000.0, key=f"te_{i}_A")
+                    n1 = c1.number_input(f"E{i+1} N1", 1, n_nodes, 1, key=f"te_{i}_n1_sa")
+                    n2 = c2.number_input(f"E{i+1} N2", 1, n_nodes, 2, key=f"te_{i}_n2_sa")
+                    E = c3.number_input(f"E{i+1} E", value=200000.0, key=f"te_{i}_E_sa")
+                    A = c4.number_input(f"E{i+1} A", value=1000.0, key=f"te_{i}_A_sa")
                     elements.append((int(n1), int(n2), E, A))
                 loads = {1: (0, -50)}
                 supports = {1: (True, True), 2: (True, True)}
-                if st.button("Solve"):
+                if st.button("Solve Truss", key="solve_truss_sa"):
                     res = truss_analysis(nodes, elements, loads, supports)
                     if "error" in res: st.error(res["error"])
                     else:
@@ -538,30 +525,30 @@ elif page == "Structural Analysis":
 
             with tabs[7]:
                 st.subheader("Connections")
-                load = st.number_input("Force (kN)", 1.0, 1000.0, 100.0)
-                bolt_dia = st.number_input("Bolt dia (mm)", 12, 30, 20)
-                num_bolts = st.number_input("Bolts", 1, 20, 4)
-                if st.button("Check"):
+                load = st.number_input("Force (kN)", 1.0, 1000.0, 100.0, key="conn_load_sa")
+                bolt_dia = st.number_input("Bolt dia (mm)", 12, 30, 20, key="conn_dia_sa")
+                num_bolts = st.number_input("Bolts", 1, 20, 4, key="conn_bolts_sa")
+                if st.button("Check Connection", key="check_conn_sa"):
                     res = steel_connection_check("bolted", bolt_dia, "8.8", num_bolts, 10, 0, load)
                     if res["status"] == "OK": st.success(f"OK – {res['utilization']:.2f}")
                     else: st.error(f"Fails – {res['utilization']:.2f}")
 
             with tabs[8]:
                 st.subheader("Load Combinations")
-                dead = st.number_input("Dead", value=100.0)
-                live = st.number_input("Live", value=50.0)
-                wind = st.number_input("Wind", value=30.0)
-                if st.button("Generate"):
+                dead = st.number_input("Dead", value=100.0, key="lc_dead_sa")
+                live = st.number_input("Live", value=50.0, key="lc_live_sa")
+                wind = st.number_input("Wind", value=30.0, key="lc_wind_sa")
+                if st.button("Generate Combinations", key="gen_combos_sa"):
                     combos = load_combinations({"dead": dead, "live": live, "wind": wind})
                     for name, val in combos:
                         st.write(f"{name}: {val:.2f}")
 
             with tabs[9]:
                 st.subheader("Seismic")
-                Ss = st.number_input("Ss", 0.0, 3.0, 1.0)
-                S1 = st.number_input("S1", 0.0, 2.0, 0.4)
-                site = st.selectbox("Site", ["A","B","C","D","E"])
-                if st.button("Calculate"):
+                Ss = st.number_input("Ss", 0.0, 3.0, 1.0, key="seis_Ss_sa")
+                S1 = st.number_input("S1", 0.0, 2.0, 0.4, key="seis_S1_sa")
+                site = st.selectbox("Site", ["A","B","C","D","E"], key="seis_site_sa")
+                if st.button("Calculate Base Shear", key="calc_seis_sa"):
                     res = seismic_base_shear(Ss, S1, site, 5, 1.0, 0.5)
                     st.metric("Cs", f"{res['Cs']:.4f}")
 
@@ -570,7 +557,7 @@ elif page == "Structural Analysis":
                 for a in member.get('analyses', []):
                     with st.expander(f"{a['type']} – {a['created_at'][:10]}"):
                         st.json(a['data'])
-                        if st.button("Delete", key=f"dela_{a['id']}"):
+                        if st.button("Delete Analysis", key=f"dela_{a['id']}"):
                             delete_member_analysis(username, project.id, member['id'], a['id'])
                             st.rerun()
         else:
@@ -583,26 +570,26 @@ elif page == "Eurocodes":
     
     with tabs[0]:
         st.subheader("Load Combinations")
-        dead = st.number_input("Dead", value=100.0)
-        live = st.number_input("Live", value=50.0)
-        wind = st.number_input("Wind", value=30.0)
-        if st.button("Generate"):
+        dead = st.number_input("Dead", value=100.0, key="ec0_dead")
+        live = st.number_input("Live", value=50.0, key="ec0_live")
+        wind = st.number_input("Wind", value=30.0, key="ec0_wind")
+        if st.button("Generate", key="ec0_gen"):
             combos = ec0.eurocode_uls_combinations(dead, live, wind)
             for name, val, _, _ in combos:
                 st.write(f"{name}: {val:.2f}")
     with tabs[1]:
         st.subheader("RC Beam")
-        b = st.number_input("Width (mm)", 100, 1000, 300)
-        h = st.number_input("Height (mm)", 200, 2000, 500)
-        M_ed = st.number_input("Moment (kNm)", 10.0, 2000.0, 120.0)
-        if st.button("Design Beam"):
+        b = st.number_input("Width (mm)", 100, 1000, 300, key="ec2_b")
+        h = st.number_input("Height (mm)", 200, 2000, 500, key="ec2_h")
+        M_ed = st.number_input("Moment (kNm)", 10.0, 2000.0, 120.0, key="ec2_Med")
+        if st.button("Design Beam", key="ec2_design"):
             res = ec2.en1992_rc_beam_design(b, h, h-50, 30, 500, M_ed, 80, 6)
             st.json(res)
     with tabs[2]:
         st.subheader("Steel Beam")
-        section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"])
-        M_ed = st.number_input("Moment (kNm)", 50.0, 1000.0, 100.0)
-        if st.button("Design Steel"):
+        section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="ec3_section")
+        M_ed = st.number_input("Moment (kNm)", 50.0, 1000.0, 100.0, key="ec3_Med")
+        if st.button("Design Steel", key="ec3_design"):
             res = ec3.en1993_steel_beam_design(section, 355, M_ed, 50, 6, True)
             st.json(res)
     with tabs[3]:
@@ -610,11 +597,11 @@ elif page == "Eurocodes":
         st.info("EN 1994 module")
     with tabs[4]:
         st.subheader("Timber")
-        tc = st.selectbox("Class", ["C24", "GL24h"])
-        b = st.number_input("Width", 50, 400, 100)
-        h = st.number_input("Depth", 100, 600, 300)
-        M = st.number_input("Moment", 5.0, 200.0, 30.0)
-        if st.button("Design Timber"):
+        tc = st.selectbox("Class", ["C24", "GL24h"], key="ec5_class")
+        b = st.number_input("Width", 50, 400, 100, key="ec5_b")
+        h = st.number_input("Depth", 100, 600, 300, key="ec5_h")
+        M = st.number_input("Moment", 5.0, 200.0, 30.0, key="ec5_M")
+        if st.button("Design Timber", key="ec5_design"):
             res = ec5.en1995_timber_beam_design(tc, b, h, M, 20, 5)
             st.json(res)
     with tabs[5]:
@@ -622,16 +609,16 @@ elif page == "Eurocodes":
         st.info("EN 1996 module")
     with tabs[6]:
         st.subheader("Geotechnical")
-        load = st.number_input("Load (kN)", 100.0, 10000.0, 500.0)
-        bearing = st.number_input("Bearing (kPa)", 50.0, 500.0, 150.0)
-        if st.button("Size"):
+        load = st.number_input("Load (kN)", 100.0, 10000.0, 500.0, key="ec7_load")
+        bearing = st.number_input("Bearing (kPa)", 50.0, 500.0, 150.0, key="ec7_bearing")
+        if st.button("Size", key="ec7_size"):
             res = ec7.en1997_shallow_foundation(load, bearing)
             st.success(f"Side: {res['side_m']:.2f} m")
     with tabs[7]:
         st.subheader("Seismic")
-        W = st.number_input("Weight (kN)", 100.0, 10000.0, 1000.0)
-        ag = st.number_input("ag (g)", 0.05, 0.5, 0.25)
-        if st.button("Calculate"):
+        W = st.number_input("Weight (kN)", 100.0, 10000.0, 1000.0, key="ec8_W")
+        ag = st.number_input("ag (g)", 0.05, 0.5, 0.25, key="ec8_ag")
+        if st.button("Calculate", key="ec8_calc"):
             res = ec8.en1998_base_shear(W, ag, "C", 2.0, 0.5)
             st.metric("Base Shear", f"{res['V_base_kN']:.1f} kN")
     with tabs[8]:
@@ -644,7 +631,7 @@ elif page == "Reports":
     projects = get_projects(username)
     if projects:
         pnames = [p.name for p in projects]
-        selected = st.selectbox("Project", pnames)
+        selected = st.selectbox("Project", pnames, key="report_project")
         project = next(p for p in projects if p.name == selected)
         st.markdown(f"### {project.name}")
         st.write(f"Type: {project.project_type} | Level: {project.level}")
@@ -655,13 +642,13 @@ elif page == "Reports":
                     for a in m.get('analyses', []):
                         st.write(f"**{a['type']}**")
                         st.json(a['data'])
-        if st.button("Generate PDF"):
+        if st.button("Generate PDF", key="gen_pdf_report"):
             data = {"Project": project.name, "Type": project.project_type, "Level": project.level, "Members": len(members)}
             filename, error = generate_pdf_report(data, filename=f"{project.name}_report.pdf")
             if error: st.error(error)
             else:
                 with open(filename, "rb") as f:
-                    st.download_button("Download", f, file_name=filename)
+                    st.download_button("Download", f, file_name=filename, key="download_report")
     else:
         st.info("No projects.")
 
