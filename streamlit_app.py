@@ -225,8 +225,9 @@ def generate_random_plan(building, num_rooms=4):
     for i in range(num_rooms):
         parent = random.choice(plan)
         dir = random.choice(directions)
-        new_w = random.randint(300, 500)
-        new_h = random.randint(300, 500)
+        # Fixed: dimensions now fit within plan (max 800x500)
+        new_w = random.randint(200, 500)
+        new_h = random.randint(200, 500)
         if dir == "top":
             new_x = parent["x"] + (parent["w"] - new_w) // 2
             new_y = parent["y"] - new_h - 10
@@ -303,7 +304,7 @@ if not st.session_state.logged_in:
                     st.error("Fill all fields.")
                 else:
                     try:
-                        create_user(uname, pwd, role="engineer")  # default to engineer
+                        create_user(uname, pwd, role="engineer")
                         st.success("Account created! You can now log in.")
                     except ValueError as e:
                         st.error(str(e))
@@ -548,10 +549,11 @@ if page == "Project Dashboard":
                     col_edit1, col_edit2 = st.columns(2)
                     with col_edit1:
                         if st.button("➕ Add Random Room"):
-                            w = random.randint(100, 200) * 5
-                            h = random.randint(100, 200) * 5
-                            x = random.randint(0, 700)
-                            y = random.randint(0, 400)
+                            # Fixed: width and height within 800x500
+                            w = random.randint(100, 800)
+                            h = random.randint(100, 500)
+                            x = random.randint(0, 800 - w)
+                            y = random.randint(0, 500 - h)
                             color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
                             plan.append({
                                 "x": x, "y": y, "w": w, "h": h,
@@ -576,10 +578,10 @@ if page == "Project Dashboard":
                         with st.container():
                             cols = st.columns([2, 1, 1, 1, 1, 1])
                             cols[0].write(room["name"])
-                            new_w = cols[1].number_input("W", 100, 2000, room["w"], key=f"rw_{i}")
-                            new_h = cols[2].number_input("H", 100, 2000, room["h"], key=f"rh_{i}")
-                            new_x = cols[3].number_input("X", 0, 800, room["x"], key=f"rx_{i}")
-                            new_y = cols[4].number_input("Y", 0, 500, room["y"], key=f"ry_{i}")
+                            new_w = cols[1].number_input("W", 100, 800, room["w"], key=f"rw_{i}")
+                            new_h = cols[2].number_input("H", 100, 500, room["h"], key=f"rh_{i}")
+                            new_x = cols[3].number_input("X", 0, 800 - room["w"], room["x"], key=f"rx_{i}")
+                            new_y = cols[4].number_input("Y", 0, 500 - room["h"], room["y"], key=f"ry_{i}")
                             new_color = cols[5].color_picker("", value=room.get("color", "#4f46e5"), key=f"rc_{i}")
                             changed = False
                             if new_w != room["w"] or new_h != room["h"] or new_x != room["x"] or new_y != room["y"] or new_color != room["color"]:
@@ -609,7 +611,7 @@ if page == "Project Dashboard":
                             update_building_plan(building, mem, username)
                             st.rerun()
                         if col_n2.button("➡️ Right", key="nudge_right"):
-                            plan[idx]["x"] = room["x"] + nudge_step
+                            plan[idx]["x"] = min(room["x"] + nudge_step, 800 - room["w"])
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
@@ -619,7 +621,7 @@ if page == "Project Dashboard":
                             update_building_plan(building, mem, username)
                             st.rerun()
                         if col_n4.button("⬇️ Down", key="nudge_down"):
-                            plan[idx]["y"] = room["y"] + nudge_step
+                            plan[idx]["y"] = min(room["y"] + nudge_step, 500 - room["h"])
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
