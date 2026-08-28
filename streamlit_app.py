@@ -1,5 +1,12 @@
 # streamlit_app.py
 # DRUM Studio – Professional Structural Analysis Workstation
+
+from engineering import (
+    # ... existing imports ...
+    generate_pdf_report, plot_beam_diagrams, plot_truss_deformed
+)
+import matplotlib.pyplot as plt
+
 import streamlit as st
 import uuid
 from datetime import datetime
