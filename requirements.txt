@@ -3,3 +3,4 @@ plotly
 streamlit>=1.25
 numpy
 fpdf2   # optional, for exporting reports
+werkzeug
