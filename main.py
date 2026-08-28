@@ -125,24 +125,23 @@ def save_memory(username, memory):
         json.dump(memory, f, indent=2)
 
 def log_event(username, memory, message):
-    log_entry = {
-        "time": datetime.now().isoformat(),
-        "msg": message
-    }
+    log_entry = {"time": datetime.now().isoformat(), "msg": message}
     memory.setdefault("logs", []).append(log_entry)
     memory["logs"] = memory["logs"][-100:]
     save_memory(username, memory)
 
 # ---------- Project Management ----------
 class Project:
-    def __init__(self, name="Untitled Project", description="", project_type="building", id=None):
+    def __init__(self, name="Untitled", description="", project_type="building", level="superstructure", id=None):
         self.id = id or str(uuid.uuid4())
         self.name = name
         self.description = description
         self.project_type = project_type
+        self.level = level
         self.created_at = datetime.now().isoformat()
         self.updated_at = datetime.now().isoformat()
-        self.members = []  # List of structural members
+        self.members = []
+        self.drawings = []
 
     def to_dict(self):
         return {
@@ -150,27 +149,31 @@ class Project:
             "name": self.name,
             "description": self.description,
             "project_type": self.project_type,
+            "level": self.level,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "members": self.members,
+            "drawings": self.drawings,
         }
 
     @classmethod
     def from_dict(cls, data):
         p = cls(
-            name=data.get("name", "Untitled Project"),
+            name=data.get("name", "Untitled"),
             description=data.get("description", ""),
             project_type=data.get("project_type", "building"),
+            level=data.get("level", "superstructure"),
             id=data.get("id")
         )
         p.created_at = data.get("created_at", p.created_at)
         p.updated_at = data.get("updated_at", p.updated_at)
         p.members = data.get("members", [])
+        p.drawings = data.get("drawings", [])
         return p
 
-def create_project(username, name, description="", project_type="building"):
+def create_project(username, name, description="", project_type="building", level="superstructure"):
     mem = load_memory(username)
-    project = Project(name=name, description=description, project_type=project_type)
+    project = Project(name=name, description=description, project_type=project_type, level=level)
     mem["projects"].append(project.to_dict())
     save_memory(username, mem)
     return project
@@ -186,7 +189,7 @@ def get_project(username, project_id):
             return p
     return None
 
-def update_project(username, project_id, name=None, description=None, project_type=None):
+def update_project(username, project_id, name=None, description=None, project_type=None, level=None):
     mem = load_memory(username)
     for p in mem.get("projects", []):
         if p["id"] == project_id:
@@ -196,6 +199,8 @@ def update_project(username, project_id, name=None, description=None, project_ty
                 p["description"] = description
             if project_type is not None:
                 p["project_type"] = project_type
+            if level is not None:
+                p["level"] = level
             p["updated_at"] = datetime.now().isoformat()
             break
     save_memory(username, mem)
@@ -206,13 +211,14 @@ def delete_project(username, project_id):
     save_memory(username, mem)
 
 # ---------- Member Management ----------
-def add_member(username, project_id, member_type, name, properties):
+def add_member(username, project_id, member_type, name, properties, level="superstructure"):
     mem = load_memory(username)
     member = {
         "id": str(uuid.uuid4()),
         "type": member_type,
         "name": name,
         "properties": properties,
+        "level": level,
         "analyses": [],
         "created_at": datetime.now().isoformat(),
     }
@@ -223,13 +229,15 @@ def add_member(username, project_id, member_type, name, properties):
     save_memory(username, mem)
     return member
 
-def get_members(username, project_id):
+def get_members(username, project_id, level=None):
     project = get_project(username, project_id)
     if project:
+        if level:
+            return [m for m in project.members if m.get("level") == level]
         return project.members
     return []
 
-def update_member(username, project_id, member_id, name=None, properties=None):
+def update_member(username, project_id, member_id, name=None, properties=None, level=None):
     mem = load_memory(username)
     for p in mem.get("projects", []):
         if p["id"] == project_id:
@@ -239,6 +247,8 @@ def update_member(username, project_id, member_id, name=None, properties=None):
                         m["name"] = name
                     if properties is not None:
                         m["properties"] = properties
+                    if level is not None:
+                        m["level"] = level
                     break
     save_memory(username, mem)
 
@@ -277,7 +287,39 @@ def delete_member_analysis(username, project_id, member_id, analysis_id):
                     break
     save_memory(username, mem)
 
-# ---------- Analysis Storage (Legacy) ----------
+# ---------- Drawing Management ----------
+def add_drawing(username, project_id, drawing_name, drawing_type, level, file_data=None):
+    mem = load_memory(username)
+    drawing = {
+        "id": str(uuid.uuid4()),
+        "name": drawing_name,
+        "type": drawing_type,
+        "level": level,
+        "file_data": file_data,
+        "created_at": datetime.now().isoformat(),
+    }
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            p["drawings"].append(drawing)
+            break
+    save_memory(username, mem)
+    return drawing
+
+def get_drawings(username, project_id):
+    project = get_project(username, project_id)
+    if project:
+        return project.drawings
+    return []
+
+def delete_drawing(username, project_id, drawing_id):
+    mem = load_memory(username)
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            p["drawings"] = [d for d in p["drawings"] if d["id"] != drawing_id]
+            break
+    save_memory(username, mem)
+
+# ---------- Analysis Storage ----------
 def save_analysis(username, analysis_type, data, project_id=None):
     mem = load_memory(username)
     if "analyses" not in mem:
@@ -344,10 +386,7 @@ def is_engineer(user_data):
 def get_material_costs(username):
     mem = load_memory(username)
     return mem.get("settings", {}).get("default_material_costs", {
-        "concrete": 150,
-        "steel": 80,
-        "glass": 120,
-        "labor": 100,
+        "concrete": 150, "steel": 80, "glass": 120, "labor": 100,
     })
 
 def update_material_costs(username, costs):
@@ -368,6 +407,7 @@ def update_theme(username, theme):
     mem["settings"]["theme"] = theme
     save_memory(username, mem)
 
+# ---------- Quests ----------
 def init_quests():
     return {
         "create_project": {"progress": 0, "target": 1, "completed": False},
