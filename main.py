@@ -5,28 +5,7 @@ import uuid
 from datetime import datetime
 from copy import deepcopy
 
-# Remove this line:
-# from werkzeug.security import generate_password_hash, check_password_hash
-
-# Add these functions at the top of main.py instead:
-import hashlib
-import secrets
-
-def generate_password_hash(password):
-    salt = secrets.token_hex(16)
-    hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-    return f"pbkdf2:sha256:100000${salt}${hash.hex()}"
-
-def check_password_hash(stored_password, provided_password):
-    try:
-        method, salt, hashval = stored_password.split('$')
-        # method format: pbkdf2:sha256:100000
-        algorithm = method.split(':')[1]
-        iterations = int(method.split(':')[2])
-        new_hash = hashlib.pbkdf2_hmac(algorithm, provided_password.encode('utf-8'), salt.encode('utf-8'), iterations)
-        return new_hash.hex() == hashval
-    except Exception:
-        return False
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # ---------- File paths ----------
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -91,7 +70,7 @@ def authenticate(username, password):
             return user
         return None
 
-    # Legacy plain‑text password (e.g., "admin123") – allow once and upgrade
+    # Legacy plain‑text password – allow once and upgrade
     if stored_pw == password:
         user["password"] = generate_password_hash(password)
         users[username] = user
@@ -114,7 +93,6 @@ def add_xp(username, amount):
     if not user:
         return None
     user["xp"] = user.get("xp", 0) + amount
-    # Level up logic
     while user["xp"] >= xp_for_level(user.get("level", 1)):
         user["xp"] -= xp_for_level(user.get("level", 1))
         user["level"] = user.get("level", 1) + 1
@@ -133,7 +111,6 @@ def load_memory(username):
     try:
         with open(path, "r") as f:
             mem = json.load(f)
-            # Ensure all keys exist
             for key, val in DEFAULT_STATE.items():
                 if key not in mem:
                     mem[key] = val
@@ -153,7 +130,6 @@ def log_event(username, memory, message):
         "msg": message
     }
     memory.setdefault("logs", []).append(log_entry)
-    # Keep only last 100 entries to avoid file bloat
     memory["logs"] = memory["logs"][-100:]
     save_memory(username, memory)
 
@@ -186,7 +162,6 @@ class Building:
 
 # ---------- Plan generation (simple random) ----------
 def generate_plan(building, num_rooms=5):
-    """Fill building.plan with random rooms."""
     import random
     colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"]
     plan = []
@@ -230,7 +205,6 @@ def grant_quest_rewards(username, quest_id):
     quests = user.get("quests", {})
     q = quests.get(quest_id)
     if q and q["completed"] and not q.get("rewarded", False):
-        # Give XP as reward
         add_xp(username, 50)
         q["rewarded"] = True
         user["quests"] = quests
@@ -238,11 +212,8 @@ def grant_quest_rewards(username, quest_id):
 
 # ---------- Placeholders for other functions ----------
 def simulate_evolution(building):
-    """Simulate one evolution step for building score."""
-    # Not implemented in current UI, but kept for compatibility
     building.score += 1
     return building
 
 def generate_rhythm():
-    """Generate a random rhythm string (unused)."""
     return "♩♪♫"
