@@ -66,38 +66,75 @@ if not load_users():
         print("WARNING: Using default admin password. Set DRUM_ADMIN_PASS env variable.")
     create_user(admin_user, admin_pass, role="admin")
 
+# Updated CSS with animations
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+/* Global */
 html, body, .stApp {
     font-family: 'Inter', sans-serif;
     background: #0F172A; color: #E2E8F0;
 }
 h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
+
+/* Sidebar */
 .sidebar .sidebar-content { background: #1E293B; }
+
+/* Buttons */
 .stButton>button {
     background: linear-gradient(135deg, #3B82F6, #2563EB);
     color: white; border: none; border-radius: 8px;
-    padding: 0.5rem 1.5rem; font-weight: 600; transition: all 0.2s ease;
+    padding: 0.5rem 1.5rem; font-weight: 600;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    background-size: 200% auto;
 }
 .stButton>button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+    box-shadow: 0 8px 16px rgba(59, 130, 246, 0.4);
+    background: linear-gradient(135deg, #3B82F6, #1D4ED8);
+    animation: gradientShift 1.5s ease infinite;
 }
 .stButton>button:active {
     transform: translateY(0);
-    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
 }
+
+/* Metric cards */
 .metric-card {
     background: #1E293B; border-radius: 12px; padding: 1rem;
     border: 1px solid #334155;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
 }
-.stNumberInput>div>div>input {
-    background: #1E293B; color: #F8FAFC; border: 1px solid #475569;
+.metric-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.3);
 }
+
+/* Input fields */
+.stNumberInput>div>div>input,
+.stTextInput>div>div>input {
+    background: #1E293B; color: #F8FAFC;
+    border: 1px solid #475569;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.stNumberInput>div>div>input:focus,
+.stTextInput>div>div>input:focus {
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+}
+
+/* Select boxes */
 .stSelectbox>div>div>select {
     background: #1E293B; color: #F8FAFC;
+    transition: border-color 0.3s ease;
 }
+.stSelectbox>div>div>select:hover {
+    border-color: #3B82F6;
+}
+
+/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px;
 }
@@ -106,21 +143,71 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     border-radius: 8px 8px 0 0;
     padding: 8px 16px;
     color: #94A3B8;
+    transition: background-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    background-color: #334155;
+    color: #F8FAFC;
+    transform: translateY(-2px);
 }
 .stTabs [aria-selected="true"] {
     background-color: #334155;
     color: #F8FAFC;
 }
+
+/* Expanders */
 .stExpander {
     background: #1E293B;
     border: 1px solid #334155;
     border-radius: 12px;
     margin-bottom: 10px;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
+.stExpander:hover {
+    border-color: #3B82F6;
+    box-shadow: 0 4px 12px rgba(59,130,246,0.2);
+}
+
+/* Tables */
 .stTable {
     background: #1E293B;
     border-radius: 8px;
     overflow: hidden;
+}
+
+/* Main content fade-in */
+.main .block-container {
+    animation: fadeIn 0.5s ease-out;
+}
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Download button */
+.stDownloadButton>button {
+    transition: all 0.3s ease;
+}
+.stDownloadButton>button:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+/* Radio and checkbox labels */
+.stRadio label,
+.stCheckbox label {
+    transition: color 0.3s ease;
+}
+.stRadio label:hover,
+.stCheckbox label:hover {
+    color: #F8FAFC;
+}
+
+/* Gradient shift animation */
+@keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
 }
 </style>
 """, unsafe_allow_html=True)
