@@ -7,6 +7,7 @@ import math
 import os
 import json
 import matplotlib.pyplot as plt
+import eurocodes
 
 from main import (
     load_users, save_users, get_user, create_user, authenticate,
@@ -66,7 +67,6 @@ if not load_users():
         print("WARNING: Using default admin password. Set DRUM_ADMIN_PASS env variable.")
     create_user(admin_user, admin_pass, role="admin")
 
-# Updated CSS with animations
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -350,7 +350,7 @@ def generate_random_plan(building, num_rooms=4):
     building.plan = plan
 
 # ======================
-# LOGIN PAGE (emoji kept)
+# LOGIN PAGE
 # ======================
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -404,7 +404,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ======================
-# MAIN APP (no emojis)
+# MAIN APP
 # ======================
 username = st.session_state.username
 user_data = st.session_state.user_data
@@ -484,7 +484,7 @@ with st.sidebar:
         st.rerun()
 
 # ======================
-# PAGE: PROJECT DASHBOARD (no emojis)
+# PAGE: PROJECT DASHBOARD
 # ======================
 if page == "Project Dashboard":
     st.title("Project Dashboard")
@@ -834,7 +834,7 @@ if page == "Project Dashboard":
         st.caption("No activity yet.")
 
 # ======================
-# PAGE: STRUCTURAL ANALYSIS (no emojis)
+# PAGE: STRUCTURAL ANALYSIS
 # ======================
 elif page == "Structural Analysis":
     st.title("Structural Analysis Workstation")
@@ -853,7 +853,7 @@ elif page == "Structural Analysis":
         "Beams", "Columns", "Slabs", "Foundations",
         "Walls & Finishes", "Piles", "Prestressed",
         "Retaining Wall", "Truss", "Connections",
-        "Load Combos", "Seismic", "Export/Report"
+        "Load Combos", "Seismic", "Eurocodes", "Export/Report"
     ])
 
     # ---- BEAMS ----
@@ -960,7 +960,10 @@ elif page == "Structural Analysis":
         fs = st.number_input("Factor of safety", 2.0, 5.0, 3.0, 0.1, key="fdn_fs")
         if st.button("Size Footing", key="size_fdn"):
             res = foundation_size(bearing, load, fs)
-            st.success(f"Square footing side: **{output_metric(res['side_m'], 'length'):.2f} {unit_label('length')}** (area: {output_metric(res['area_m2'], 'area'):.2f} {unit_label('area')})")
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                st.success(f"Square footing side: **{output_metric(res['side_m'], 'length'):.2f} {unit_label('length')}** (area: {output_metric(res['area_m2'], 'area'):.2f} {unit_label('area')})")
 
     # ---- WALLS & FINISHES ----
     with tabs[4]:
@@ -1177,8 +1180,156 @@ elif page == "Structural Analysis":
             st.write(f"Sds = {res['Sds']:.3f} g, Sd1 = {res['Sd1']:.3f} g")
             st.write(res["note"])
 
-    # ---- EXPORT / REPORT ----
+    # ---- EUROCODES ----
     with tabs[12]:
+        st.subheader("Eurocode Design Modules")
+        
+        euro_tabs = st.tabs(["Load Combinations", "RC Beam (EN 1992)", "Steel Beam (EN 1993)", "Timber Beam (EN 1995)", "RC Column (EN 1992)"])
+        
+        # Load Combinations
+        with euro_tabs[0]:
+            st.markdown("### EN 1990 Load Combinations")
+            code_type = st.radio("Combination type", ["ULS", "SLS"], key="ec_combo_type")
+            c1, c2, c3, c4, c5 = st.columns(5)
+            dead = c1.number_input("Dead (G)", value=100.0, key="ec_dead")
+            live = c2.number_input("Live (Q)", value=50.0, key="ec_live")
+            wind = c3.number_input("Wind (W)", value=30.0, key="ec_wind")
+            snow = c4.number_input("Snow (S)", value=20.0, key="ec_snow")
+            seismic = c5.number_input("Seismic (E)", value=0.0, key="ec_seismic")
+            
+            if code_type == "ULS":
+                if st.button("Generate ULS Combinations", key="ec_uls"):
+                    combos = eurocodes.eurocode_uls_combinations(dead, live, wind, snow, seismic)
+                    table = {"Combination": [], "Value": []}
+                    for name, val, _, _ in combos:
+                        table["Combination"].append(name)
+                        table["Value"].append(f"{val:.2f}")
+                    st.table(table)
+                    max_val = max(combos, key=lambda x: x[1])
+                    st.success(f"Governing: {max_val[0]} = {max_val[1]:.2f}")
+            else:
+                if st.button("Generate SLS Combinations", key="ec_sls"):
+                    combos = eurocodes.eurocode_sls_combinations(dead, live, wind, snow)
+                    table = {"Combination": [], "Value": []}
+                    for name, val in combos:
+                        table["Combination"].append(name)
+                        table["Value"].append(f"{val:.2f}")
+                    st.table(table)
+        
+        # RC Beam
+        with euro_tabs[1]:
+            st.markdown("### RC Beam Design (EN 1992-1-1)")
+            col1, col2 = st.columns(2)
+            with col1:
+                b = st.number_input("Width (mm)", 100, 1000, 300, key="ec_rc_b")
+                h = st.number_input("Height (mm)", 200, 2000, 500, key="ec_rc_h")
+                d = st.number_input("Effective depth (mm)", 100, 1900, 450, key="ec_rc_d")
+                fck = st.selectbox("Concrete grade", list(CONCRETE_GRADES.keys()), key="ec_rc_fck")
+                fyk = st.number_input("Steel yield (MPa)", 400, 600, 500, key="ec_rc_fyk")
+            with col2:
+                M_ed = st.number_input("Design moment (kNm)", 10.0, 2000.0, 120.0, key="ec_rc_Med")
+                V_ed = st.number_input("Design shear (kN)", 10.0, 1000.0, 80.0, key="ec_rc_Ved")
+                span = st.number_input("Span (m)", 1.0, 30.0, 6.0, key="ec_rc_span")
+                bar_dia = st.number_input("Bar diameter (mm)", 10, 40, 20, key="ec_rc_bar")
+            if st.button("Design RC Beam", key="ec_rc_design"):
+                fck_val = CONCRETE_GRADES[fck]["fck"]
+                res = eurocodes.en1992_rc_beam_design(b, h, d, fck_val, fyk, M_ed, V_ed, span, bar_dia=bar_dia)
+                if "error" in res:
+                    st.error(res["error"])
+                elif res["pass"]:
+                    st.success("RC beam OK per EN 1992")
+                else:
+                    st.error("RC beam fails per EN 1992")
+                st.write(f"Required steel: {res['As_required_mm2']:.0f} mm²")
+                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
+                st.write(f"Deflection utilization: {res['utilization_deflection']:.2f}")
+                st.json(res)
+        
+        # Steel Beam
+        with euro_tabs[2]:
+            st.markdown("### Steel Beam Design (EN 1993-1-1)")
+            col1, col2 = st.columns(2)
+            with col1:
+                section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="ec_steel_section")
+                fy = st.selectbox("Steel grade", list(STEEL_GRADES.keys()), key="ec_steel_fy")
+            with col2:
+                M_ed = st.number_input("Design moment (kNm)", 50.0, 1000.0, 100.0, key="ec_steel_Med")
+                V_ed = st.number_input("Design shear (kN)", 20.0, 500.0, 50.0, key="ec_steel_Ved")
+                span = st.number_input("Span (m)", 2.0, 20.0, 6.0, key="ec_steel_span")
+            buckling = st.checkbox("Check lateral-torsional buckling", value=True, key="ec_steel_ltb")
+            if st.button("Design Steel Beam", key="ec_steel_design"):
+                fy_val = STEEL_GRADES[fy]["fy"]
+                res = eurocodes.en1993_steel_beam_design(section, fy_val, M_ed, V_ed, span, buckling)
+                if "error" in res:
+                    st.error(res["error"])
+                elif res["pass"]:
+                    st.success("Steel beam OK per EN 1993")
+                else:
+                    st.error("Steel beam fails per EN 1993")
+                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
+                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
+                st.write(f"Deflection utilization: {res['utilization_deflection']:.2f}")
+                if buckling:
+                    st.write(f"LTB utilization: {res['utilization_ltb']:.2f}")
+                st.json(res)
+        
+        # Timber Beam
+        with euro_tabs[3]:
+            st.markdown("### Timber Beam Design (EN 1995-1-1)")
+            col1, col2 = st.columns(2)
+            with col1:
+                timber_class = st.selectbox("Timber class", list(TIMBER_CLASSES.keys()), key="ec_timber_class")
+                b = st.number_input("Width (mm)", 50, 400, 100, key="ec_timber_b")
+                h = st.number_input("Depth (mm)", 100, 600, 300, key="ec_timber_h")
+            with col2:
+                M_ed = st.number_input("Design moment (kNm)", 5.0, 200.0, 30.0, key="ec_timber_Med")
+                V_ed = st.number_input("Design shear (kN)", 1.0, 100.0, 20.0, key="ec_timber_Ved")
+                span = st.number_input("Span (m)", 1.0, 15.0, 5.0, key="ec_timber_span")
+            service_class = st.selectbox("Service class", [1, 2, 3], key="ec_timber_sc")
+            load_duration = st.selectbox("Load duration", ["short", "medium", "long"], key="ec_timber_ld")
+            if st.button("Design Timber Beam", key="ec_timber_design"):
+                res = eurocodes.en1995_timber_beam_design(timber_class, b, h, M_ed, V_ed, span, service_class, load_duration)
+                if "error" in res:
+                    st.error(res["error"])
+                elif res["pass"]:
+                    st.success("Timber beam OK per EN 1995")
+                else:
+                    st.error("Timber beam fails per EN 1995")
+                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
+                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
+                st.write(f"Deflection utilization: {res['utilization_deflection']:.2f}")
+                st.json(res)
+        
+        # RC Column
+        with euro_tabs[4]:
+            st.markdown("### RC Column Design (EN 1992-1-1)")
+            col1, col2 = st.columns(2)
+            with col1:
+                N_ed = st.number_input("Axial load (kN)", 100.0, 5000.0, 500.0, key="ec_col_Ned")
+                M_ed = st.number_input("Moment (kNm)", 0.0, 500.0, 20.0, key="ec_col_Med")
+                b = st.number_input("Width (mm)", 200, 1000, 300, key="ec_col_b")
+                h = st.number_input("Depth (mm)", 200, 1000, 300, key="ec_col_h")
+            with col2:
+                fck = st.selectbox("Concrete grade", list(CONCRETE_GRADES.keys()), key="ec_col_fck")
+                fyk = st.number_input("Steel yield (MPa)", 400, 600, 500, key="ec_col_fyk")
+                l0 = st.number_input("Effective length (m)", 2.0, 10.0, 3.0, key="ec_col_l0")
+            if st.button("Design RC Column", key="ec_col_design"):
+                fck_val = CONCRETE_GRADES[fck]["fck"]
+                res = eurocodes.en1992_rc_column_design(N_ed, M_ed, b, h, fck_val, fyk, l0)
+                if "error" in res:
+                    st.error(res["error"])
+                elif res["pass"]:
+                    st.success("RC column OK per EN 1992")
+                else:
+                    st.error("RC column fails per EN 1992")
+                st.write(f"Axial utilization: {res['utilization_axial']:.2f}")
+                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
+                st.write(f"Combined utilization: {res['utilization_combined']:.2f}")
+                st.write(f"Lambda: {res['lambda']:.1f} (limit: {res['lambda_limit']:.1f})")
+                st.json(res)
+
+    # ---- EXPORT / REPORT ----
+    with tabs[13]:
         st.subheader("Export Analysis Report (PDF)")
         if st.button("Generate Report", key="pdf_gen"):
             if st.session_state.active_building:
@@ -1239,7 +1390,7 @@ elif page == "Structural Analysis":
         st.info("No active building. Open a project from the dashboard or create a new one.")
 
 # ======================
-# PAGE: ARCHIVES (no emojis)
+# PAGE: ARCHIVES
 # ======================
 else:
     st.title("Project Archives")
