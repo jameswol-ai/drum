@@ -7,7 +7,6 @@ import math
 import os
 import json
 import matplotlib.pyplot as plt
-import eurocodes
 
 from main import (
     load_users, save_users, get_user, create_user, authenticate,
@@ -16,20 +15,35 @@ from main import (
     init_quests, update_quests, grant_quest_rewards, DEFAULT_STATE,
     list_users, update_user_role, delete_user, is_admin, is_engineer
 )
-from engineering import (
-    CONCRETE_GRADES, STEEL_GRADES, TIMBER_CLASSES, WALL_TYPES, FINISHES,
-    check_rc_beam, check_steel_beam, check_rc_column,
-    slab_thickness_estimate, foundation_size,
-    calculate_total_area, compute_floor_loads, check_structural_integrity,
-    calculate_energy_score, estimate_cost,
-    to_metric, to_imperial,
-    pile_capacity,
-    check_prestressed_beam,
-    generate_analysis_report,
-    retaining_wall_stability,
-    truss_analysis, load_combinations, seismic_base_shear, steel_connection_check,
-    generate_pdf_report, plot_beam_diagrams, plot_truss_deformed
-)
+
+# Engineering package imports
+from engineering.materials import CONCRETE_GRADES, STEEL_GRADES, TIMBER_CLASSES, WALL_TYPES, FINISHES
+from engineering.beams import check_rc_beam, check_steel_beam, check_timber_beam, check_composite_beam
+from engineering.columns import check_rc_column
+from engineering.slabs import slab_thickness_estimate
+from engineering.foundations import foundation_size
+from engineering.piles import pile_capacity
+from engineering.prestressed import check_prestressed_beam
+from engineering.retaining import retaining_wall_stability
+from engineering.truss import truss_analysis
+from engineering.connections import steel_connection_check
+from engineering.load_combinations import load_combinations
+from engineering.seismic import seismic_base_shear
+from engineering.cost import calculate_total_area, compute_floor_loads, check_structural_integrity, calculate_energy_score, estimate_cost
+from engineering.pdf_report import generate_pdf_report, generate_analysis_report
+from engineering.visualization import plot_beam_diagrams, plot_truss_deformed
+
+# Eurocodes package imports
+import eurocodes.en1990 as ec0
+import eurocodes.en1991 as ec1
+import eurocodes.en1992 as ec2
+import eurocodes.en1993 as ec3
+import eurocodes.en1994 as ec4
+import eurocodes.en1995 as ec5
+import eurocodes.en1996 as ec6
+import eurocodes.en1997 as ec7
+import eurocodes.en1998 as ec8
+import eurocodes.en1999 as ec9
 
 st.set_page_config(page_title="DRUM Studio", page_icon="🏗️", layout="wide",
                    initial_sidebar_state="expanded",
@@ -435,8 +449,8 @@ with st.sidebar:
     st.caption(f"Role: {user_data.get('role', 'viewer')}")
     st.markdown("---")
     page = st.radio("Navigate",
-                    ["Project Dashboard", "Structural Analysis", "Archives"],
-                    index=["Project Dashboard", "Structural Analysis", "Archives"].index(st.session_state.page),
+                    ["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives"],
+                    index=["Project Dashboard", "Structural Analysis", "Eurocodes", "Archives"].index(st.session_state.page),
                     key="nav_radio")
     st.session_state.page = page
     unit_choice = st.radio("Unit System", ["metric", "imperial"], index=0, key="unit_radio")
@@ -834,11 +848,11 @@ if page == "Project Dashboard":
         st.caption("No activity yet.")
 
 # ======================
-# PAGE: STRUCTURAL ANALYSIS
+# PAGE: STRUCTURAL ANALYSIS (Simplified)
 # ======================
 elif page == "Structural Analysis":
     st.title("Structural Analysis Workstation")
-    st.caption("All inputs and outputs respect the selected unit system.")
+    st.caption("Simplified checks for quick analysis.")
 
     def ui_number_input(label, min_val, max_val, value, step, key, unit_type):
         display_min = output_metric(min_val, unit_type) if st.session_state.unit_system=="imperial" else min_val
@@ -853,7 +867,7 @@ elif page == "Structural Analysis":
         "Beams", "Columns", "Slabs", "Foundations",
         "Walls & Finishes", "Piles", "Prestressed",
         "Retaining Wall", "Truss", "Connections",
-        "Load Combos", "Seismic", "Eurocodes", "Export/Report"
+        "Load Combos", "Seismic"
     ])
 
     # ---- BEAMS ----
@@ -895,10 +909,10 @@ elif page == "Structural Analysis":
 
         elif beam_mat == "Steel":
             grade = st.selectbox("Steel Grade", list(STEEL_GRADES.keys()), key="beam_steel_grade")
-            section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="beam_sec")
+            section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300", "IPE 400", "IPE 500"], key="beam_sec")
             span = ui_number_input(f"Span ({unit_label('length')})", 2.0, 20.0, 6.0, 0.1, "beam_span_steel", "length")
-            M_ed = ui_number_input(f"M_Ed ({unit_label('moment')})", 50.0, 500.0, 100.0, 1.0, "beam_Med_steel", "moment")
-            V_ed = ui_number_input(f"V_Ed ({unit_label('force')})", 20.0, 300.0, 50.0, 1.0, "beam_Ved_steel", "force")
+            M_ed = ui_number_input(f"M_Ed ({unit_label('moment')})", 50.0, 1000.0, 100.0, 1.0, "beam_Med_steel", "moment")
+            V_ed = ui_number_input(f"V_Ed ({unit_label('force')})", 20.0, 500.0, 50.0, 1.0, "beam_Ved_steel", "force")
             if st.button("Check Steel Beam", key="check_steel_beam"):
                 steel = STEEL_GRADES[grade]
                 res = check_steel_beam(section, M_ed, V_ed, span, steel)
@@ -907,23 +921,50 @@ elif page == "Structural Analysis":
                 st.write(f"Utilization: {res['utilization']:.2f}")
                 st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
                 st.json(res)
-            st.markdown("---")
-            st.subheader("Beam Diagrams")
-            col_diag1, col_diag2, col_diag3 = st.columns(3)
-            load_type = col_diag1.selectbox("Load type", ["udl", "point", "none"], key="diag_load_type_steel")
-            if load_type == "udl":
-                load_val = col_diag2.number_input("UDL (kN/m)", value=10.0, key="diag_udl_steel")
-                point_pos = 0.0
-            elif load_type == "point":
-                load_val = col_diag2.number_input("Point load (kN)", value=50.0, key="diag_point_steel")
-                point_pos = col_diag3.number_input("Position from left (m)", value=span/2, key="diag_point_pos_steel")
-            else:
-                load_val = 0.0
-                point_pos = 0.0
-            if st.button("Plot Diagrams", key="plot_beam_steel"):
-                fig = plot_beam_diagrams("simply_supported", span, load_type, load_val, point_pos)
-                st.pyplot(fig)
-                plt.close(fig)
+
+        elif beam_mat == "Timber":
+            timber_class = st.selectbox("Timber Class", list(TIMBER_CLASSES.keys()), key="beam_timber_class")
+            b = ui_number_input(f"Width ({unit_label('length_mm')})", 50, 400, 100, 10, "beam_timber_b", "length_mm")
+            h = ui_number_input(f"Depth ({unit_label('length_mm')})", 100, 600, 300, 10, "beam_timber_h", "length_mm")
+            span = ui_number_input(f"Span ({unit_label('length')})", 1.0, 15.0, 5.0, 0.1, "beam_timber_span", "length")
+            M_ed = ui_number_input(f"Design Moment M_Ed ({unit_label('moment')})", 5.0, 200.0, 30.0, 1.0, "beam_timber_Med", "moment")
+            V_ed = ui_number_input(f"Design Shear V_Ed ({unit_label('force')})", 1.0, 100.0, 20.0, 1.0, "beam_timber_Ved", "force")
+            load_duration = st.selectbox("Load duration", ["short", "medium", "long"], key="beam_timber_loaddur")
+            if st.button("Check Timber Beam", key="check_timber_beam"):
+                res = check_timber_beam(timber_class, b, h, M_ed, V_ed, span, load_duration)
+                if "error" in res:
+                    st.error(res["error"])
+                elif res["pass"]:
+                    st.success("Timber beam OK")
+                else:
+                    st.error("Timber beam fails")
+                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
+                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
+                st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
+                st.json(res)
+
+        elif beam_mat == "Composite":
+            section = st.selectbox("Steel Section", ["IPE 160", "IPE 220", "IPE 300"], key="comp_section")
+            grade = st.selectbox("Steel Grade", list(STEEL_GRADES.keys()), key="comp_steel_grade")
+            slab_t = ui_number_input(f"Slab thickness ({unit_label('length_mm')})", 50, 200, 120, 10, "comp_slab_t", "length_mm")
+            slab_w = ui_number_input(f"Slab effective width ({unit_label('length_mm')})", 500, 3000, 1500, 100, "comp_slab_w", "length_mm")
+            fck = st.number_input("Concrete fck (MPa)", 20, 50, 30, key="comp_fck")
+            span = ui_number_input(f"Span ({unit_label('length')})", 2.0, 20.0, 8.0, 0.1, "comp_span", "length")
+            M_ed = ui_number_input(f"Design Moment M_Ed ({unit_label('moment')})", 50.0, 1000.0, 200.0, 1.0, "comp_Med", "moment")
+            V_ed = ui_number_input(f"Design Shear V_Ed ({unit_label('force')})", 20.0, 500.0, 100.0, 1.0, "comp_Ved", "force")
+            if st.button("Check Composite Beam", key="check_comp_beam"):
+                steel = STEEL_GRADES[grade]
+                res = check_composite_beam(section, slab_t, slab_w, fck, M_ed, V_ed, span, steel)
+                if "error" in res:
+                    st.error(res["error"])
+                elif res["pass"]:
+                    st.success("Composite beam OK")
+                else:
+                    st.error("Composite beam fails")
+                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
+                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
+                st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
+                st.json(res)
 
     # ---- COLUMNS ----
     with tabs[1]:
@@ -976,8 +1017,6 @@ elif page == "Structural Analysis":
         finish_load = sum(FINISHES[f] for f in finishes)
         finish_disp = output_metric(finish_load, 'pressure') if st.session_state.unit_system=="imperial" else finish_load
         st.metric("Total finish load", f"{finish_disp:.3f} {unit_label('pressure')}")
-        if st.button("Apply to Model", key="apply_wall"):
-            st.info("Wall/finish selection saved to project.")
 
     # ---- PILES ----
     with tabs[5]:
@@ -991,8 +1030,6 @@ elif page == "Structural Analysis":
         if st.button("Calculate Capacity", key="pile_calc"):
             res = pile_capacity(diameter, length, soil, N, safety)
             st.metric("Allowable Capacity", f"{output_metric(res['Q_all_kN'], 'force'):.1f} {unit_label('force')}")
-            st.write(f"Ultimate capacity: {output_metric(res['Q_ult_kN'], 'force'):.1f} {unit_label('force')}")
-            st.write(f"Shaft resistance: {output_metric(res['shaft_kN'], 'force'):.1f} {unit_label('force')}, Base: {output_metric(res['base_kN'], 'force'):.1f} {unit_label('force')}")
 
     # ---- PRESTRESSED ----
     with tabs[6]:
@@ -1009,10 +1046,6 @@ elif page == "Structural Analysis":
             res = check_prestressed_beam(M_ext, P, e, A, I, y_top, y_bot, fck)
             if res["pass"]: st.success("Stresses within limits")
             else: st.error("Stress limit exceeded")
-            st.write(f"Top stress: {output_metric(res['sigma_top_MPa'], 'stress'):.2f} {unit_label('stress')}")
-            st.write(f"Bottom stress: {output_metric(res['sigma_bot_MPa'], 'stress'):.2f} {unit_label('stress')}")
-            st.write(f"Allowable compression: {output_metric(res['sigma_c_allow'], 'stress'):.2f} {unit_label('stress')}")
-            st.write(f"Allowable tension: {output_metric(res['sigma_t_allow'], 'stress'):.2f} {unit_label('stress')}")
 
     # ---- RETAINING WALL ----
     with tabs[7]:
@@ -1020,15 +1053,10 @@ elif page == "Structural Analysis":
         H = ui_number_input(f"Wall height ({unit_label('length')})", 1.0, 10.0, 3.0, 0.1, "rw_H", "length")
         gamma = ui_number_input(f"Soil unit weight ({unit_label('weight_density')})", 15.0, 22.0, 18.0, 0.1, "rw_gamma", "weight_density")
         phi = st.number_input("Friction angle (°)", 20.0, 45.0, 30.0, key="rw_phi")
-        c = ui_number_input(f"Cohesion ({unit_label('pressure')})", 0.0, 50.0, 0.0, 0.1, "rw_c", "pressure")
-        surcharge = ui_number_input(f"Surcharge ({unit_label('pressure')})", 0.0, 20.0, 0.0, 0.1, "rw_surch", "pressure")
-        wall_friction = st.number_input("Base friction coefficient", 0.3, 0.8, 0.6, key="rw_fric")
         if st.button("Check Stability", key="rw_check"):
-            res = retaining_wall_stability(H, gamma, phi, c, surcharge, wall_friction)
+            res = retaining_wall_stability(H, gamma, phi, 0, 0, 0.6)
             if res["pass"]: st.success("Wall stable")
             else: st.error("Stability check failed")
-            st.write(f"Active thrust: {output_metric(res['Pa_kN'], 'force'):.2f} {unit_label('force')}/m")
-            st.write(f"Overturning SF: {res['F_overt']:.2f}, Sliding SF: {res['F_sliding']:.2f}")
 
     # ---- TRUSS ----
     with tabs[8]:
@@ -1101,19 +1129,8 @@ elif page == "Structural Analysis":
                             force_data["Element"].append(idx)
                             force_data["Force"].append(f"{f:.3f}")
                         st.table(force_data)
-                    st.markdown("**Reactions (kN)**")
-                    react_data = {"Node": [], "Rx": [], "Ry": []}
-                    for nid, (rx, ry) in result["reactions"].items():
-                        react_data["Node"].append(nid)
-                        react_data["Rx"].append(f"{rx:.3f}")
-                        react_data["Ry"].append(f"{ry:.3f}")
-                    st.table(react_data)
-                    if st.button("Plot Deformed Shape", key="plot_truss"):
-                        fig = plot_truss_deformed(nodes, elements, result["displacements"])
-                        st.pyplot(fig)
-                        plt.close(fig)
 
-    # ---- STEEL CONNECTIONS ----
+    # ---- CONNECTIONS ----
     with tabs[9]:
         st.subheader("Steel Connection Design (Simplified)")
         conn_type = st.selectbox("Connection type", ["bolted", "welded"], key="conn_type")
@@ -1129,23 +1146,11 @@ elif page == "Structural Analysis":
                     st.success(f"Connection OK – Utilization: {res['utilization']:.2f}")
                 else:
                     st.error(f"Connection FAILS – Utilization: {res['utilization']:.2f}")
-                st.write(f"Design capacity: {res['design_capacity']:.2f} kN")
-                st.write(f"Shear per bolt: {res['shear_capacity_per_bolt']:.2f} kN, Bearing per bolt: {res['bearing_capacity_per_bolt']:.2f} kN")
-        else:
-            weld_size = ui_number_input("Weld leg size (mm)", 3, 15, 6, 1, "conn_weld", "length_mm")
-            if st.button("Check Connection", key="conn_check_weld"):
-                res = steel_connection_check("welded", 0, "8.8", 0, 0, weld_size, load)
-                if res["status"] == "OK":
-                    st.success(f"Connection OK – Utilization: {res['utilization']:.2f}")
-                else:
-                    st.error(f"Connection FAILS – Utilization: {res['utilization']:.2f}")
-                st.write(f"Total capacity: {res['total_capacity']:.2f} kN")
 
     # ---- LOAD COMBINATIONS ----
     with tabs[10]:
         st.subheader("Load Combinations")
         code = st.selectbox("Design code", ["eurocode", "asce"], key="lc_code")
-        st.markdown("Enter characteristic load effects (e.g., bending moment or axial force).")
         c1, c2, c3, c4, c5 = st.columns(5)
         dead = c1.number_input("Dead (G)", value=0.0, key="lc_dead")
         live = c2.number_input("Live (Q)", value=0.0, key="lc_live")
@@ -1160,8 +1165,6 @@ elif page == "Structural Analysis":
                 table["Combination"].append(name)
                 table["Value"].append(f"{val:.2f}")
             st.table(table)
-            max_val = max(combos, key=lambda x: x[1])
-            st.success(f"Governing combination: {max_val[0]} = {max_val[1]:.2f}")
 
     # ---- SEISMIC ----
     with tabs[11]:
@@ -1171,223 +1174,225 @@ elif page == "Structural Analysis":
         S1 = col_s2.number_input("S1 (g)", min_value=0.0, value=0.4, key="seis_S1")
         site_class = col_s3.selectbox("Site Class", ["A","B","C","D","E"], key="seis_site")
         R = col_s4.number_input("R factor", min_value=1.0, value=5.0, key="seis_R")
-        col_s5, col_s6 = st.columns(2)
-        Ie = col_s5.number_input("Importance Factor Ie", min_value=1.0, value=1.0, key="seis_Ie")
-        T = col_s6.number_input("Period T (sec)", min_value=0.1, value=0.5, key="seis_T")
         if st.button("Calculate Base Shear", key="seis_calc"):
-            res = seismic_base_shear(Ss, S1, site_class, R, Ie, T)
+            res = seismic_base_shear(Ss, S1, site_class, R, 1.0, 0.5)
             st.metric("Seismic response coefficient Cs", f"{res['Cs']:.4f}")
-            st.write(f"Sds = {res['Sds']:.3f} g, Sd1 = {res['Sd1']:.3f} g")
-            st.write(res["note"])
 
-    # ---- EUROCODES ----
-    with tabs[12]:
-        st.subheader("Eurocode Design Modules")
-        
-        euro_tabs = st.tabs(["Load Combinations", "RC Beam (EN 1992)", "Steel Beam (EN 1993)", "Timber Beam (EN 1995)", "RC Column (EN 1992)"])
-        
-        # Load Combinations
-        with euro_tabs[0]:
-            st.markdown("### EN 1990 Load Combinations")
-            code_type = st.radio("Combination type", ["ULS", "SLS"], key="ec_combo_type")
-            c1, c2, c3, c4, c5 = st.columns(5)
-            dead = c1.number_input("Dead (G)", value=100.0, key="ec_dead")
-            live = c2.number_input("Live (Q)", value=50.0, key="ec_live")
-            wind = c3.number_input("Wind (W)", value=30.0, key="ec_wind")
-            snow = c4.number_input("Snow (S)", value=20.0, key="ec_snow")
-            seismic = c5.number_input("Seismic (E)", value=0.0, key="ec_seismic")
-            
-            if code_type == "ULS":
-                if st.button("Generate ULS Combinations", key="ec_uls"):
-                    combos = eurocodes.eurocode_uls_combinations(dead, live, wind, snow, seismic)
-                    table = {"Combination": [], "Value": []}
-                    for name, val, _, _ in combos:
-                        table["Combination"].append(name)
-                        table["Value"].append(f"{val:.2f}")
-                    st.table(table)
-                    max_val = max(combos, key=lambda x: x[1])
-                    st.success(f"Governing: {max_val[0]} = {max_val[1]:.2f}")
+# ======================
+# PAGE: EUROCODES
+# ======================
+elif page == "Eurocodes":
+    st.title("Eurocode Design Modules")
+    st.caption("Detailed design per European Standards (EN 1990 – EN 1999)")
+
+    euro_tabs = st.tabs([
+        "EN 1990", "EN 1991", "EN 1992", "EN 1993", "EN 1994",
+        "EN 1995", "EN 1996", "EN 1997", "EN 1998", "EN 1999"
+    ])
+
+    # EN 1990 - Load Combinations
+    with euro_tabs[0]:
+        st.subheader("EN 1990 – Load Combinations")
+        code_type = st.radio("Combination type", ["ULS", "SLS"], key="ec0_type")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        dead = c1.number_input("Dead (G)", value=100.0, key="ec0_dead")
+        live = c2.number_input("Live (Q)", value=50.0, key="ec0_live")
+        wind = c3.number_input("Wind (W)", value=30.0, key="ec0_wind")
+        snow = c4.number_input("Snow (S)", value=20.0, key="ec0_snow")
+        seismic = c5.number_input("Seismic (E)", value=0.0, key="ec0_seismic")
+        if code_type == "ULS":
+            if st.button("Generate ULS Combinations", key="ec0_uls"):
+                combos = ec0.eurocode_uls_combinations(dead, live, wind, snow, seismic)
+                table = {"Combination": [], "Value": []}
+                for name, val, _, _ in combos:
+                    table["Combination"].append(name)
+                    table["Value"].append(f"{val:.2f}")
+                st.table(table)
+        else:
+            if st.button("Generate SLS Combinations", key="ec0_sls"):
+                combos = ec0.eurocode_sls_combinations(dead, live, wind, snow)
+                table = {"Combination": [], "Value": []}
+                for name, val in combos:
+                    table["Combination"].append(name)
+                    table["Value"].append(f"{val:.2f}")
+                st.table(table)
+
+    # EN 1991 - Actions
+    with euro_tabs[1]:
+        st.subheader("EN 1991 – Actions on Structures")
+        building_type = st.selectbox("Building type", ["residential", "office", "assembly", "retail", "storage", "industrial"], key="ec1_btype")
+        imposed = ec1.en1991_imposed_loads(building_type)
+        st.metric(f"Imposed load ({building_type})", f"{imposed} kN/m²")
+        st.markdown("---")
+        altitude = st.number_input("Altitude (m)", 0, 3000, 0, key="ec1_alt")
+        snow = ec1.en1991_snow_load(altitude_m=altitude)
+        st.metric("Snow load", f"{snow:.2f} kN/m²")
+        st.markdown("---")
+        wind_speed = st.number_input("Basic wind speed (m/s)", 10, 50, 25, key="ec1_wind")
+        terrain = st.selectbox("Terrain category", ["0", "I", "II", "III", "IV"], key="ec1_terrain")
+        wind_pressure = ec1.en1991_wind_load(wind_speed, terrain)
+        st.metric("Wind pressure", f"{wind_pressure:.2f} kPa")
+
+    # EN 1992 - Concrete
+    with euro_tabs[2]:
+        st.subheader("EN 1992 – Concrete Structures")
+        col1, col2 = st.columns(2)
+        with col1:
+            b = st.number_input("Width (mm)", 100, 1000, 300, key="ec2_b")
+            h = st.number_input("Height (mm)", 200, 2000, 500, key="ec2_h")
+            d = st.number_input("Effective depth (mm)", 100, 1900, 450, key="ec2_d")
+            fck = st.selectbox("Concrete grade", list(CONCRETE_GRADES.keys()), key="ec2_fck")
+            fyk = st.number_input("Steel yield (MPa)", 400, 600, 500, key="ec2_fyk")
+        with col2:
+            M_ed = st.number_input("Design moment (kNm)", 10.0, 2000.0, 120.0, key="ec2_Med")
+            V_ed = st.number_input("Design shear (kN)", 10.0, 1000.0, 80.0, key="ec2_Ved")
+            span = st.number_input("Span (m)", 1.0, 30.0, 6.0, key="ec2_span")
+        if st.button("Design RC Beam (EN 1992)", key="ec2_beam"):
+            fck_val = CONCRETE_GRADES[fck]["fck"]
+            res = ec2.en1992_rc_beam_design(b, h, d, fck_val, fyk, M_ed, V_ed, span)
+            if "error" in res:
+                st.error(res["error"])
+            elif res["pass"]:
+                st.success("RC beam OK per EN 1992")
             else:
-                if st.button("Generate SLS Combinations", key="ec_sls"):
-                    combos = eurocodes.eurocode_sls_combinations(dead, live, wind, snow)
-                    table = {"Combination": [], "Value": []}
-                    for name, val in combos:
-                        table["Combination"].append(name)
-                        table["Value"].append(f"{val:.2f}")
-                    st.table(table)
-        
-        # RC Beam
-        with euro_tabs[1]:
-            st.markdown("### RC Beam Design (EN 1992-1-1)")
-            col1, col2 = st.columns(2)
-            with col1:
-                b = st.number_input("Width (mm)", 100, 1000, 300, key="ec_rc_b")
-                h = st.number_input("Height (mm)", 200, 2000, 500, key="ec_rc_h")
-                d = st.number_input("Effective depth (mm)", 100, 1900, 450, key="ec_rc_d")
-                fck = st.selectbox("Concrete grade", list(CONCRETE_GRADES.keys()), key="ec_rc_fck")
-                fyk = st.number_input("Steel yield (MPa)", 400, 600, 500, key="ec_rc_fyk")
-            with col2:
-                M_ed = st.number_input("Design moment (kNm)", 10.0, 2000.0, 120.0, key="ec_rc_Med")
-                V_ed = st.number_input("Design shear (kN)", 10.0, 1000.0, 80.0, key="ec_rc_Ved")
-                span = st.number_input("Span (m)", 1.0, 30.0, 6.0, key="ec_rc_span")
-                bar_dia = st.number_input("Bar diameter (mm)", 10, 40, 20, key="ec_rc_bar")
-            if st.button("Design RC Beam", key="ec_rc_design"):
-                fck_val = CONCRETE_GRADES[fck]["fck"]
-                res = eurocodes.en1992_rc_beam_design(b, h, d, fck_val, fyk, M_ed, V_ed, span, bar_dia=bar_dia)
-                if "error" in res:
-                    st.error(res["error"])
-                elif res["pass"]:
-                    st.success("RC beam OK per EN 1992")
-                else:
-                    st.error("RC beam fails per EN 1992")
-                st.write(f"Required steel: {res['As_required_mm2']:.0f} mm²")
-                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
-                st.write(f"Deflection utilization: {res['utilization_deflection']:.2f}")
-                st.json(res)
-        
-        # Steel Beam
-        with euro_tabs[2]:
-            st.markdown("### Steel Beam Design (EN 1993-1-1)")
-            col1, col2 = st.columns(2)
-            with col1:
-                section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="ec_steel_section")
-                fy = st.selectbox("Steel grade", list(STEEL_GRADES.keys()), key="ec_steel_fy")
-            with col2:
-                M_ed = st.number_input("Design moment (kNm)", 50.0, 1000.0, 100.0, key="ec_steel_Med")
-                V_ed = st.number_input("Design shear (kN)", 20.0, 500.0, 50.0, key="ec_steel_Ved")
-                span = st.number_input("Span (m)", 2.0, 20.0, 6.0, key="ec_steel_span")
-            buckling = st.checkbox("Check lateral-torsional buckling", value=True, key="ec_steel_ltb")
-            if st.button("Design Steel Beam", key="ec_steel_design"):
-                fy_val = STEEL_GRADES[fy]["fy"]
-                res = eurocodes.en1993_steel_beam_design(section, fy_val, M_ed, V_ed, span, buckling)
-                if "error" in res:
-                    st.error(res["error"])
-                elif res["pass"]:
-                    st.success("Steel beam OK per EN 1993")
-                else:
-                    st.error("Steel beam fails per EN 1993")
-                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
-                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
-                st.write(f"Deflection utilization: {res['utilization_deflection']:.2f}")
-                if buckling:
-                    st.write(f"LTB utilization: {res['utilization_ltb']:.2f}")
-                st.json(res)
-        
-        # Timber Beam
-        with euro_tabs[3]:
-            st.markdown("### Timber Beam Design (EN 1995-1-1)")
-            col1, col2 = st.columns(2)
-            with col1:
-                timber_class = st.selectbox("Timber class", list(TIMBER_CLASSES.keys()), key="ec_timber_class")
-                b = st.number_input("Width (mm)", 50, 400, 100, key="ec_timber_b")
-                h = st.number_input("Depth (mm)", 100, 600, 300, key="ec_timber_h")
-            with col2:
-                M_ed = st.number_input("Design moment (kNm)", 5.0, 200.0, 30.0, key="ec_timber_Med")
-                V_ed = st.number_input("Design shear (kN)", 1.0, 100.0, 20.0, key="ec_timber_Ved")
-                span = st.number_input("Span (m)", 1.0, 15.0, 5.0, key="ec_timber_span")
-            service_class = st.selectbox("Service class", [1, 2, 3], key="ec_timber_sc")
-            load_duration = st.selectbox("Load duration", ["short", "medium", "long"], key="ec_timber_ld")
-            if st.button("Design Timber Beam", key="ec_timber_design"):
-                res = eurocodes.en1995_timber_beam_design(timber_class, b, h, M_ed, V_ed, span, service_class, load_duration)
-                if "error" in res:
-                    st.error(res["error"])
-                elif res["pass"]:
-                    st.success("Timber beam OK per EN 1995")
-                else:
-                    st.error("Timber beam fails per EN 1995")
-                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
-                st.write(f"Shear utilization: {res['utilization_shear']:.2f}")
-                st.write(f"Deflection utilization: {res['utilization_deflection']:.2f}")
-                st.json(res)
-        
-        # RC Column
-        with euro_tabs[4]:
-            st.markdown("### RC Column Design (EN 1992-1-1)")
-            col1, col2 = st.columns(2)
-            with col1:
-                N_ed = st.number_input("Axial load (kN)", 100.0, 5000.0, 500.0, key="ec_col_Ned")
-                M_ed = st.number_input("Moment (kNm)", 0.0, 500.0, 20.0, key="ec_col_Med")
-                b = st.number_input("Width (mm)", 200, 1000, 300, key="ec_col_b")
-                h = st.number_input("Depth (mm)", 200, 1000, 300, key="ec_col_h")
-            with col2:
-                fck = st.selectbox("Concrete grade", list(CONCRETE_GRADES.keys()), key="ec_col_fck")
-                fyk = st.number_input("Steel yield (MPa)", 400, 600, 500, key="ec_col_fyk")
-                l0 = st.number_input("Effective length (m)", 2.0, 10.0, 3.0, key="ec_col_l0")
-            if st.button("Design RC Column", key="ec_col_design"):
-                fck_val = CONCRETE_GRADES[fck]["fck"]
-                res = eurocodes.en1992_rc_column_design(N_ed, M_ed, b, h, fck_val, fyk, l0)
-                if "error" in res:
-                    st.error(res["error"])
-                elif res["pass"]:
-                    st.success("RC column OK per EN 1992")
-                else:
-                    st.error("RC column fails per EN 1992")
-                st.write(f"Axial utilization: {res['utilization_axial']:.2f}")
-                st.write(f"Moment utilization: {res['utilization_moment']:.2f}")
-                st.write(f"Combined utilization: {res['utilization_combined']:.2f}")
-                st.write(f"Lambda: {res['lambda']:.1f} (limit: {res['lambda_limit']:.1f})")
-                st.json(res)
+                st.error("RC beam fails per EN 1992")
+            st.json(res)
 
-    # ---- EXPORT / REPORT ----
-    with tabs[13]:
-        st.subheader("Export Analysis Report (PDF)")
-        if st.button("Generate Report", key="pdf_gen"):
-            if st.session_state.active_building:
-                building = st.session_state.active_building
-                plan = building.plan
-                area = calculate_total_area(plan)
-                load = compute_floor_loads(plan,
-                    live_load_kN_per_m2=st.session_state.eng_params["live_load"],
-                    slab_thickness_m=st.session_state.eng_params["slab_thickness"],
-                    additional_dead_load_kN_per_m2=st.session_state.eng_params["additional_dead"])
-                integrity = check_structural_integrity(plan)
-                cost = estimate_cost(plan)
-                project_data = {
-                    "Project Name": building.name,
-                    "Engineer": username,
-                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
-                    "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
-                }
-                analysis_results = {
-                    "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
-                    "Suggested Beam": integrity['suggested_beam'],
-                    "Structural Integrity": "Pass" if integrity['pass'] else "Fail",
-                }
-                cost_breakdown = {
-                    "Concrete": cost["concrete"],
-                    "Steel": cost["steel"],
-                    "Glass": cost["glass"],
-                    "Labor": cost["labor"],
-                    "Total": cost["total"],
-                }
-                plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
-                filename, error = generate_pdf_report(project_data, plan_svg, analysis_results, cost_breakdown,
-                                                      filename=f"{building.name}_report.pdf")
-                if error:
-                    st.error(error)
-                else:
-                    with open(filename, "rb") as f:
-                        st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
-                    st.success("Report generated!")
+    # EN 1993 - Steel
+    with euro_tabs[3]:
+        st.subheader("EN 1993 – Steel Structures")
+        section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300", "IPE 400", "IPE 500"], key="ec3_section")
+        fy = st.selectbox("Steel grade", list(STEEL_GRADES.keys()), key="ec3_fy")
+        M_ed = st.number_input("Design moment (kNm)", 50.0, 2000.0, 100.0, key="ec3_Med")
+        V_ed = st.number_input("Design shear (kN)", 20.0, 1000.0, 50.0, key="ec3_Ved")
+        span = st.number_input("Span (m)", 2.0, 30.0, 6.0, key="ec3_span")
+        buckling = st.checkbox("Check LTB", value=True, key="ec3_ltb")
+        if st.button("Design Steel Beam (EN 1993)", key="ec3_beam"):
+            fy_val = STEEL_GRADES[fy]["fy"]
+            res = ec3.en1993_steel_beam_design(section, fy_val, M_ed, V_ed, span, buckling)
+            if "error" in res:
+                st.error(res["error"])
+            elif res["pass"]:
+                st.success("Steel beam OK per EN 1993")
             else:
-                st.info("No active building. Open a project first.")
+                st.error("Steel beam fails per EN 1993")
+            st.json(res)
 
-    # ---- Building Integration ----
-    st.markdown("---")
-    if st.session_state.active_building:
-        st.subheader("Building Plan Analysis")
-        plan = st.session_state.active_building.plan
-        area = calculate_total_area(plan)
-        load = compute_floor_loads(plan,
-            live_load_kN_per_m2=st.session_state.eng_params["live_load"],
-            slab_thickness_m=st.session_state.eng_params["slab_thickness"],
-            additional_dead_load_kN_per_m2=st.session_state.eng_params["additional_dead"])
-        st.write(f"Total floor area: {output_metric(area, 'area'):.1f} {unit_label('area')}, Design load: {output_metric(load, 'force'):.1f} {unit_label('force')}")
-        integrity = check_structural_integrity(plan)
-        st.write(f"Max span: {output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}, Suggested beam: {integrity['suggested_beam']}")
-    else:
-        st.info("No active building. Open a project from the dashboard or create a new one.")
+    # EN 1994 - Composite
+    with euro_tabs[4]:
+        st.subheader("EN 1994 – Composite Structures")
+        section = st.selectbox("Steel Section", ["IPE 160", "IPE 220", "IPE 300"], key="ec4_section")
+        slab_t = st.number_input("Slab thickness (mm)", 50, 200, 120, key="ec4_slabt")
+        slab_w = st.number_input("Slab width (mm)", 500, 3000, 1500, key="ec4_slabw")
+        fck = st.selectbox("Concrete grade", list(CONCRETE_GRADES.keys()), key="ec4_fck")
+        fy = st.selectbox("Steel grade", list(STEEL_GRADES.keys()), key="ec4_fy")
+        M_ed = st.number_input("Design moment (kNm)", 50.0, 2000.0, 200.0, key="ec4_Med")
+        V_ed = st.number_input("Design shear (kN)", 20.0, 1000.0, 100.0, key="ec4_Ved")
+        span = st.number_input("Span (m)", 2.0, 30.0, 8.0, key="ec4_span")
+        if st.button("Design Composite Beam (EN 1994)", key="ec4_beam"):
+            fck_val = CONCRETE_GRADES[fck]["fck"]
+            fy_val = STEEL_GRADES[fy]["fy"]
+            res = ec4.en1994_composite_beam_design(section, slab_t, slab_w, fck_val, fy_val, M_ed, V_ed, span)
+            if "error" in res:
+                st.error(res["error"])
+            elif res["pass"]:
+                st.success("Composite beam OK per EN 1994")
+            else:
+                st.error("Composite beam fails per EN 1994")
+            st.json(res)
+
+    # EN 1995 - Timber
+    with euro_tabs[5]:
+        st.subheader("EN 1995 – Timber Structures")
+        timber_class = st.selectbox("Timber class", list(TIMBER_CLASSES.keys()), key="ec5_class")
+        b = st.number_input("Width (mm)", 50, 400, 100, key="ec5_b")
+        h = st.number_input("Depth (mm)", 100, 600, 300, key="ec5_h")
+        M_ed = st.number_input("Design moment (kNm)", 5.0, 200.0, 30.0, key="ec5_Med")
+        V_ed = st.number_input("Design shear (kN)", 1.0, 100.0, 20.0, key="ec5_Ved")
+        span = st.number_input("Span (m)", 1.0, 15.0, 5.0, key="ec5_span")
+        service_class = st.selectbox("Service class", [1, 2, 3], key="ec5_sc")
+        load_duration = st.selectbox("Load duration", ["short", "medium", "long"], key="ec5_ld")
+        if st.button("Design Timber Beam (EN 1995)", key="ec5_beam"):
+            res = ec5.en1995_timber_beam_design(timber_class, b, h, M_ed, V_ed, span, service_class, load_duration)
+            if "error" in res:
+                st.error(res["error"])
+            elif res["pass"]:
+                st.success("Timber beam OK per EN 1995")
+            else:
+                st.error("Timber beam fails per EN 1995")
+            st.json(res)
+
+    # EN 1996 - Masonry
+    with euro_tabs[6]:
+        st.subheader("EN 1996 – Masonry Structures")
+        wall_t = st.number_input("Wall thickness (mm)", 100, 500, 215, key="ec6_t")
+        wall_h = st.number_input("Wall height (m)", 1.0, 10.0, 3.0, key="ec6_h")
+        fk = st.number_input("Masonry strength fk (MPa)", 2.0, 20.0, 5.0, key="ec6_fk")
+        N_ed = st.number_input("Axial load (kN/m)", 10.0, 1000.0, 100.0, key="ec6_N")
+        if st.button("Check Masonry Wall (EN 1996)", key="ec6_wall"):
+            res = ec6.en1996_masonry_wall_design(wall_t, wall_h, fk, N_ed)
+            if "error" in res:
+                st.error(res["error"])
+            elif res["pass"]:
+                st.success("Masonry wall OK per EN 1996")
+            else:
+                st.error("Masonry wall fails per EN 1996")
+            st.json(res)
+
+    # EN 1997 - Geotechnical
+    with euro_tabs[7]:
+        st.subheader("EN 1997 – Geotechnical Design")
+        st.markdown("**Shallow Foundation**")
+        load = st.number_input("Column load (kN)", 100.0, 10000.0, 500.0, key="ec7_load")
+        bearing = st.number_input("Bearing capacity (kPa)", 50.0, 500.0, 150.0, key="ec7_bearing")
+        if st.button("Size Footing (EN 1997)", key="ec7_footing"):
+            res = ec7.en1997_shallow_foundation(load, bearing)
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                st.success(f"Footing side: {res['side_m']:.2f} m")
+        st.markdown("---")
+        st.markdown("**Pile Capacity**")
+        dia = st.number_input("Pile diameter (m)", 0.3, 2.0, 0.6, key="ec7_dia")
+        length = st.number_input("Pile length (m)", 5.0, 40.0, 15.0, key="ec7_len")
+        soil = st.selectbox("Soil type", ["sand", "clay"], key="ec7_soil")
+        N = st.number_input("SPT N-value", 5, 60, 20, key="ec7_N")
+        if st.button("Calculate Pile Capacity (EN 1997)", key="ec7_pile"):
+            res = ec7.en1997_pile_capacity(dia, length, soil, N)
+            if "error" in res:
+                st.error(res["error"])
+            else:
+                st.metric("Allowable Capacity", f"{res['Q_all_kN']:.1f} kN")
+
+    # EN 1998 - Seismic
+    with euro_tabs[8]:
+        st.subheader("EN 1998 – Seismic Design")
+        W = st.number_input("Seismic weight (kN)", 100.0, 10000.0, 1000.0, key="ec8_W")
+        ag = st.number_input("Ground acceleration ag (g)", 0.05, 0.5, 0.25, key="ec8_ag")
+        soil_class = st.selectbox("Soil class", ["A", "B", "C", "D", "E"], key="ec8_soil")
+        q_factor = st.number_input("Behaviour factor q", 1.0, 5.0, 2.0, key="ec8_q")
+        T = st.number_input("Period T (s)", 0.1, 4.0, 0.5, key="ec8_T")
+        if st.button("Calculate Base Shear (EN 1998)", key="ec8_shear"):
+            res = ec8.en1998_base_shear(W, ag, soil_class, q_factor, T)
+            st.metric("Base Shear", f"{res['V_base_kN']:.1f} kN")
+
+    # EN 1999 - Aluminium
+    with euro_tabs[9]:
+        st.subheader("EN 1999 – Aluminium Structures")
+        alloy = st.selectbox("Alloy", ["6082-T6", "6061-T6", "7075-T6"], key="ec9_alloy")
+        W = st.number_input("Section modulus (mm³)", 10000, 1000000, 100000, key="ec9_W")
+        M_ed = st.number_input("Design moment (kNm)", 10.0, 500.0, 50.0, key="ec9_Med")
+        V_ed = st.number_input("Design shear (kN)", 5.0, 200.0, 20.0, key="ec9_Ved")
+        span = st.number_input("Span (m)", 1.0, 20.0, 5.0, key="ec9_span")
+        if st.button("Check Aluminium Beam (EN 1999)", key="ec9_beam"):
+            res = ec9.en1999_aluminium_beam_design(alloy, W, M_ed, V_ed, span)
+            if "error" in res:
+                st.error(res["error"])
+            elif res["pass"]:
+                st.success("Aluminium beam OK per EN 1999")
+            else:
+                st.error("Aluminium beam fails per EN 1999")
+            st.json(res)
 
 # ======================
 # PAGE: ARCHIVES
