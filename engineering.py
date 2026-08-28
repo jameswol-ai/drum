@@ -2,9 +2,26 @@
 # Structural engineering calculations for DRUM Studio
 import math
 import json
-import numpy as np  # for truss solver
+import numpy as np
 from datetime import datetime
 import os
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from io import BytesIO
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics import renderPDF
+    from svglib.svglib import svg2rlg
+    PDF_SUPPORT = True
+except ImportError:
+    PDF_SUPPORT = False
 
 # ======================
 # MATERIAL DATABASES
@@ -50,50 +67,28 @@ FINISHES = {
 # UNIT CONVERSION HELPERS
 # ======================
 def to_metric(value, unit_type):
-    """Convert from imperial to metric if needed (not used directly, kept for compatibility)."""
-    # The main conversion is handled in streamlit_app.py, but we keep a placeholder
     return value
 
 def to_imperial(value, unit_type):
-    """Convert from metric to imperial if needed."""
     return value
 
 # ======================
 # STRUCTURAL CALCULATIONS
 # ======================
 def check_rc_beam(b_mm, h_mm, d_mm, fck_mpa, M_ed_kNm, V_ed_kN, span_m):
-    """
-    Simplified RC beam design check (EC2).
-    b_mm: width (mm)
-    h_mm: total depth (mm)
-    d_mm: effective depth (mm)
-    fck_mpa: characteristic cylinder strength (MPa)
-    M_ed_kNm: design moment (kNm)
-    V_ed_kN: design shear (kN)
-    span_m: span (m)
-    Returns dict with pass/fail and required steel area.
-    """
     fck = fck_mpa
     fcd = fck / 1.5
-    fyd = 500 / 1.15  # assuming B500 steel
-    # Calculate lever arm
+    fyd = 500 / 1.15
     z = min(0.95 * d_mm, d_mm - 50)
-    # Required steel area (simplified)
     M_ed_Nmm = M_ed_kNm * 1e6
     As_req = M_ed_Nmm / (fyd * z)
     As_min = 0.26 * (2.2 / fck) * b_mm * d_mm if fck > 0 else 0
     As_req = max(As_req, As_min)
-    # Shear check (simplified)
-    v_ed = V_ed_kN * 1000 / (b_mm * d_mm)  # N/mm²
+    v_ed = V_ed_kN * 1000 / (b_mm * d_mm)
     v_rdc = 0.12 * (1 + math.sqrt(200 / d_mm)) * (100 * 0.01 * fck) ** (1/3) if d_mm > 0 else 0
     pass_shear = v_ed <= v_rdc
-    # Deflection check (simplified)
-    deflection_limit = span_m * 1000 / 250
-    # Assume simply supported with udl: δ = 5wL^4/(384EI)
-    # We ignore exact deflection for simplicity but assume OK if span/depth ratio reasonable
     span_depth_ratio = span_m * 1000 / d_mm
     pass_deflection = span_depth_ratio < 20
-
     return {
         "pass": pass_shear and pass_deflection,
         "As_req": As_req,
@@ -103,12 +98,6 @@ def check_rc_beam(b_mm, h_mm, d_mm, fck_mpa, M_ed_kNm, V_ed_kN, span_m):
     }
 
 def check_steel_beam(section, M_ed_kNm, V_ed_kN, span_m, steel_grade_dict):
-    """
-    Simplified steel beam check.
-    section: str e.g. "IPE 160", "IPE 220", "IPE 300"
-    Returns dict with utilization and deflection.
-    """
-    # Simplified section properties (I in mm^4, Wpl in mm^3)
     sections = {
         "IPE 160": {"I": 8.69e6, "Wpl": 1.09e5, "A": 2010},
         "IPE 220": {"I": 2.77e7, "Wpl": 2.52e5, "A": 3340},
@@ -119,16 +108,13 @@ def check_steel_beam(section, M_ed_kNm, V_ed_kN, span_m, steel_grade_dict):
     props = sections[section]
     fy = steel_grade_dict["fy"]
     E = steel_grade_dict["E"]
-    # Moment resistance
-    M_pl_Rd = props["Wpl"] * fy / 1.0 / 1e6  # kNm
+    M_pl_Rd = props["Wpl"] * fy / 1.0 / 1e6
     utilization_m = M_ed_kNm / M_pl_Rd
-    # Shear resistance (simplified)
     Av = props["A"] * 0.6
-    V_pl_Rd = Av * fy / (math.sqrt(3) * 1.0) / 1000  # kN
+    V_pl_Rd = Av * fy / (math.sqrt(3) * 1.0) / 1000
     utilization_v = V_ed_kN / V_pl_Rd
-    # Deflection (simplified, assume udl)
-    w = 8 * M_ed_kNm / (span_m ** 2)  # equivalent udl in kN/m
-    delta = 5 * w * (span_m*1000)**4 / (384 * E * props["I"])  # mm
+    w = 8 * M_ed_kNm / (span_m ** 2)
+    delta = 5 * w * (span_m*1000)**4 / (384 * E * props["I"])
     pass_deflection = delta < (span_m*1000)/250
     pass_overall = utilization_m <= 1.0 and utilization_v <= 1.0 and pass_deflection
     return {
@@ -141,31 +127,21 @@ def check_steel_beam(section, M_ed_kNm, V_ed_kN, span_m, steel_grade_dict):
     }
 
 def check_rc_column(N_ed_kN, M_ed_kNm, b_mm, h_mm, fck_mpa, l0_m):
-    """
-    Simplified RC column check (axial + moment using interaction approximation).
-    """
     fck = fck_mpa
     fcd = fck / 1.5
     fyd = 500 / 1.15
     Ac = b_mm * h_mm
-    # Assume 1% reinforcement
     As = 0.01 * Ac
-    # Pure axial capacity (simplified)
-    N_rd = 0.567 * fcd * Ac + 0.87 * fyd * As  # N
+    N_rd = 0.567 * fcd * Ac + 0.87 * fyd * As
     N_rd_kN = N_rd / 1000
-    # Moment capacity (simplified as 0.1*fcd*b*d^2)
     d = h_mm - 50
-    M_rd = 0.167 * fcd * b_mm * d**2 / 1e6  # kNm
-    # Check slenderness
+    M_rd = 0.167 * fcd * b_mm * d**2 / 1e6
     i = h_mm / math.sqrt(12)
     lambda_ = l0_m * 1000 / i
-    lambda_limit = 20
-    pass_slender = lambda_ <= lambda_limit
-    # Interaction check (simplified linear)
+    pass_slender = lambda_ <= 20
     if N_ed_kN > N_rd_kN or M_ed_kNm > M_rd:
         pass_interaction = False
     else:
-        # Basic check
         pass_interaction = (N_ed_kN/N_rd_kN + M_ed_kNm/M_rd) <= 1.0
     return {
         "pass": pass_interaction and pass_slender,
@@ -175,50 +151,37 @@ def check_rc_column(N_ed_kN, M_ed_kNm, b_mm, h_mm, fck_mpa, l0_m):
     }
 
 def slab_thickness_estimate(span_m, support_type):
-    """Return recommended slab thickness in meters."""
     if support_type == "simply_supported":
         return span_m / 20
-    else:  # continuous
+    else:
         return span_m / 28
 
 def foundation_size(allowable_bearing_kpa, load_kN, factor_of_safety=3.0):
-    """
-    Simplified pad footing sizing.
-    Returns dict with side length in m and area in m².
-    """
-    q_all = allowable_bearing_kpa * factor_of_safety  # ultimate bearing pressure? simplified
+    q_all = allowable_bearing_kpa * factor_of_safety
     area_req = load_kN / q_all
     side = math.sqrt(area_req)
     return {"side_m": side, "area_m2": area_req}
 
 def calculate_total_area(plan):
-    """Calculate total floor area from plan (list of rooms with x,y,w,h in mm)."""
     total = 0
     for room in plan:
-        total += room["w"] * room["h"] / 1e6  # convert mm² to m²
+        total += room["w"] * room["h"] / 1e6
     return total
 
 def compute_floor_loads(plan, live_load_kN_per_m2, slab_thickness_m, additional_dead_load_kN_per_m2):
-    """Calculate total design load on floor (simplified)."""
     area = calculate_total_area(plan)
-    concrete_density = 25  # kN/m³
+    concrete_density = 25
     dead = slab_thickness_m * concrete_density + additional_dead_load_kN_per_m2
     total_load = (dead + live_load_kN_per_m2) * area
     return total_load
 
 def check_structural_integrity(plan):
-    """
-    Check overall building plan for maximum span and suggest beam type.
-    Returns dict with pass bool and max_span_m.
-    """
-    # Find max room dimension
     max_span_mm = 0
     for room in plan:
         span = max(room["w"], room["h"])
         if span > max_span_mm:
             max_span_mm = span
     max_span_m = max_span_mm / 1000
-    # Suggested beam based on span
     if max_span_m <= 4:
         beam = "IPE 160"
     elif max_span_m <= 6:
@@ -231,26 +194,19 @@ def check_structural_integrity(plan):
     return {"pass": pass_flag, "max_span_m": max_span_m, "suggested_beam": beam}
 
 def calculate_energy_score(plan, glazing_ratio=0.2, orientation="south"):
-    """Very simplified energy score (0-100)."""
-    # Based on area and glazing
     area = calculate_total_area(plan)
     score = max(0, 100 - area*0.5 - glazing_ratio*50)
     return score
 
 def estimate_cost(plan):
-    """
-    Estimate construction cost based on area and materials.
-    Returns dict with costs in USD.
-    """
     area = calculate_total_area(plan)
-    # Rough rates per m²
     concrete_rate = 150
     steel_rate = 80
     glass_rate = 120
     labor_rate = 100
     concrete_cost = area * concrete_rate
     steel_cost = area * steel_rate
-    glass_cost = area * glass_rate * 0.2  # assume 20% glazing
+    glass_cost = area * glass_rate * 0.2
     labor_cost = area * labor_rate
     total = concrete_cost + steel_cost + glass_cost + labor_cost
     return {
@@ -262,23 +218,17 @@ def estimate_cost(plan):
     }
 
 def pile_capacity(diameter_m, length_m, soil_type, N_value, factor_of_safety=2.5):
-    """
-    Simplified pile capacity (bored/driven) based on SPT N.
-    Returns dict with capacities in kN.
-    """
-    # Simplified empirical formulas
     if soil_type == "sand":
-        # Ultimate shaft friction: 2*N kPa, base: 40*N kPa
-        shaft_stress = 2 * N_value  # kPa
-        base_stress = 40 * N_value  # kPa
-    else:  # clay
+        shaft_stress = 2 * N_value
+        base_stress = 40 * N_value
+    else:
         shaft_stress = 5 * N_value
         base_stress = 9 * N_value
     perimeter = math.pi * diameter_m
     shaft_area = perimeter * length_m
     base_area = math.pi * (diameter_m/2)**2
-    shaft_capacity = shaft_stress * shaft_area  # kN
-    base_capacity = base_stress * base_area  # kN
+    shaft_capacity = shaft_stress * shaft_area
+    base_capacity = base_stress * base_area
     Q_ult = shaft_capacity + base_capacity
     Q_all = Q_ult / factor_of_safety
     return {
@@ -289,23 +239,14 @@ def pile_capacity(diameter_m, length_m, soil_type, N_value, factor_of_safety=2.5
     }
 
 def check_prestressed_beam(M_ext_kNm, P_kN, e_m, A_m2, I_m4, y_top_m, y_bot_m, fck_mpa):
-    """
-    Check prestressed concrete beam stresses.
-    Returns dict with stress values and pass/fail.
-    """
-    # Convert to N and mm
     P = P_kN * 1000
-    M_ext = M_ext_kNm * 1e6  # Nmm
-    # Stress due to prestress
-    sigma_p_top = P/A_m2*1e-6 - P*e_m*y_top_m/(I_m4*1e12)  # MPa
+    M_ext = M_ext_kNm * 1e6
+    sigma_p_top = P/A_m2*1e-6 - P*e_m*y_top_m/(I_m4*1e12)
     sigma_p_bot = P/A_m2*1e-6 + P*e_m*y_bot_m/(I_m4*1e12)
-    # Stress due to external moment (assuming sagging positive)
-    sigma_m_top = -M_ext*y_top_m/(I_m4*1e12)  # MPa
+    sigma_m_top = -M_ext*y_top_m/(I_m4*1e12)
     sigma_m_bot = M_ext*y_bot_m/(I_m4*1e12)
-    # Total stresses
     sigma_top = sigma_p_top + sigma_m_top
     sigma_bot = sigma_p_bot + sigma_m_bot
-    # Allowable stresses
     sigma_c_allow = 0.6 * fck_mpa
     sigma_t_allow = -0.5 * math.sqrt(fck_mpa) if fck_mpa > 0 else 0
     pass_top = sigma_top <= sigma_c_allow and sigma_top >= sigma_t_allow
@@ -319,24 +260,14 @@ def check_prestressed_beam(M_ext_kNm, P_kN, e_m, A_m2, I_m4, y_top_m, y_bot_m, f
     }
 
 def retaining_wall_stability(H_m, gamma_kN_m3, phi_deg, c_kpa, surcharge_kpa, base_friction_coeff):
-    """
-    Simplified cantilever retaining wall stability check.
-    Returns dict with active thrust and factors of safety.
-    """
-    # Active earth pressure coefficient (Rankine)
     phi = math.radians(phi_deg)
     Ka = (1 - math.sin(phi)) / (1 + math.sin(phi))
-    # Active thrust (kN per m length)
     Pa = 0.5 * Ka * gamma_kN_m3 * H_m**2 + Ka * surcharge_kpa * H_m
-    # Weight of wall (assume concrete, thickness ~0.3H)
     wall_thickness = 0.3 * H_m
-    W = 25 * wall_thickness * H_m  # kN/m
-    # Overturning moment (act at H/3)
+    W = 25 * wall_thickness * H_m
     M_overt = Pa * H_m / 3
-    # Resisting moment
     M_resist = W * wall_thickness / 2
     F_overt = M_resist / M_overt if M_overt > 0 else 999
-    # Sliding
     F_sliding = (W * base_friction_coeff) / Pa if Pa > 0 else 999
     pass_flag = F_overt > 1.5 and F_sliding > 1.5
     return {
@@ -347,15 +278,9 @@ def retaining_wall_stability(H_m, gamma_kN_m3, phi_deg, c_kpa, surcharge_kpa, ba
     }
 
 def truss_method_of_joints(nodes, elements, loads, supports):
-    """Placeholder for method of joints (use truss_analysis instead)."""
     return {"info": "Use truss_analysis for full stiffness method solution."}
 
 def generate_analysis_report(data_dict, filename=None):
-    """
-    Generate a simple text/PDF report and return (filename, error).
-    For simplicity, this writes a text file with the data.
-    You can replace with reportlab or fpdf if needed.
-    """
     if not filename:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"report_{timestamp}.txt"
@@ -373,14 +298,6 @@ def generate_analysis_report(data_dict, filename=None):
 # NEW FUNCTIONS (TRUSS, LOAD COMBOS, SEISMIC, CONNECTIONS)
 # ======================
 def truss_analysis(nodes, elements, loads, supports):
-    """
-    Full 2D truss analysis using the stiffness method.
-    nodes: dict node_id -> (x, y) in mm
-    elements: list of (node1_id, node2_id, E, A)   E in MPa, A in mm²
-    loads: dict node_id -> (Fx, Fy) in kN
-    supports: dict node_id -> [True, True] for fixed x,y (or [True, False] for roller)
-    Returns dict with displacements, forces, reactions.
-    """
     n_nodes = len(nodes)
     dof = 2 * n_nodes
     K = np.zeros((dof, dof))
@@ -407,7 +324,6 @@ def truss_analysis(nodes, elements, loads, supports):
             for b in range(4):
                 K[dofs[a], dofs[b]] += k_local[a, b]
 
-    # Identify free and fixed DOFs
     free_dofs = []
     fixed_dofs = []
     for nid, (sx, sy) in supports.items():
@@ -420,7 +336,6 @@ def truss_analysis(nodes, elements, loads, supports):
             fixed_dofs.append(2*i+1)
         else:
             free_dofs.append(2*i+1)
-    # All remaining DOFs are free
     all_dofs = set(range(dof))
     for d in fixed_dofs:
         all_dofs.discard(d)
@@ -428,14 +343,12 @@ def truss_analysis(nodes, elements, loads, supports):
         all_dofs.add(d)
     free_dofs = sorted(list(all_dofs))
 
-    # Force vector (convert kN to N)
     F = np.zeros(dof)
     for nid, (fx, fy) in loads.items():
         i = node_indices[nid]
         F[2*i] = fx * 1000
         F[2*i+1] = fy * 1000
 
-    # Solve for displacements
     if free_dofs:
         K_ff = K[np.ix_(free_dofs, free_dofs)]
         F_f = F[free_dofs]
@@ -450,15 +363,13 @@ def truss_analysis(nodes, elements, loads, supports):
     if free_dofs:
         U[free_dofs] = U_f
 
-    # Reactions
     reactions = {}
     for nid, (sx, sy) in supports.items():
         i = node_indices[nid]
         Rx = np.dot(K[2*i, :], U) - F[2*i]
         Ry = np.dot(K[2*i+1, :], U) - F[2*i+1]
-        reactions[nid] = (Rx/1000, Ry/1000)  # kN
+        reactions[nid] = (Rx/1000, Ry/1000)
 
-    # Element forces
     forces = []
     for idx, (n1, n2, E, A) in enumerate(elements):
         x1, y1 = nodes[n1]
@@ -474,9 +385,8 @@ def truss_analysis(nodes, elements, loads, supports):
         u2 = U[2*i2]; v2 = U[2*i2+1]
         delta = (u2 - u1)*c + (v2 - v1)*s
         N = (E * A / L) * delta
-        forces.append(N/1000)  # kN
+        forces.append(N/1000)
 
-    # Displacements in mm
     disp = {nid: (U[2*i], U[2*i+1]) for nid, i in node_indices.items()}
     return {
         "displacements": disp,
@@ -485,7 +395,6 @@ def truss_analysis(nodes, elements, loads, supports):
     }
 
 def load_combinations(design_loads, code="eurocode"):
-    """Generate load combinations per Eurocode or ASCE."""
     combos = []
     if code.lower() == "eurocode":
         dead = design_loads.get("dead", 0)
@@ -514,7 +423,6 @@ def load_combinations(design_loads, code="eurocode"):
     return combos
 
 def seismic_base_shear(Ss, S1, site_class, R, Ie, T):
-    """Simplified ASCE 7-10 base shear calculation."""
     Fa_table = {
         "A": (0.8, 0.8, 0.8, 0.8, 0.8),
         "B": (1.0, 1.0, 1.0, 1.0, 1.0),
@@ -548,7 +456,6 @@ def seismic_base_shear(Ss, S1, site_class, R, Ie, T):
     }
 
 def steel_connection_check(connection_type, bolt_dia, bolt_grade, num_bolts, plate_thickness, weld_size, load):
-    """Simplified steel connection design check."""
     if connection_type == "bolted":
         fub = {"4.6": 400, "8.8": 800, "10.9": 1000}.get(bolt_grade, 800)
         As = (3.14159 * bolt_dia**2) / 4
@@ -570,7 +477,7 @@ def steel_connection_check(connection_type, bolt_dia, bolt_grade, num_bolts, pla
     elif connection_type == "welded":
         fu_weld = 360
         throat = 0.7 * weld_size
-        weld_length = 400  # assume total length
+        weld_length = 400
         capacity_per_mm = 0.6 * fu_weld * throat
         total_capacity = capacity_per_mm * weld_length / 1000
         return {
@@ -582,39 +489,13 @@ def steel_connection_check(connection_type, bolt_dia, bolt_grade, num_bolts, pla
     else:
         return {"error": "Invalid connection type"}
 
-
 # ======================
-# PDF REPORT GENERATION (ReportLab)
+# PDF REPORT GENERATION
 # ======================
-try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.graphics.shapes import Drawing
-    from reportlab.graphics import renderPDF
-    from svglib.svglib import svg2rlg
-    from io import BytesIO
-    import matplotlib.pyplot as plt
-    import matplotlib
-    matplotlib.use("Agg")
-except ImportError:
-    # Graceful fallback if reportlab is not installed
-    pass
-
 def generate_pdf_report(project_data, plan_svg_string=None, analysis_results=None, cost_breakdown=None, filename=None):
-    """
-    Generate a professional PDF report.
-    project_data: dict with keys like 'Project Name', 'Engineer', 'Date', etc.
-    plan_svg_string: SVG string of plan (optional) – will be rendered if svglib available.
-    analysis_results: dict with structural check results (optional)
-    cost_breakdown: dict with cost items (optional)
-    filename: output filename
-    Returns (filename, error)
-    """
+    if not PDF_SUPPORT:
+        return None, "ReportLab or svglib not installed."
     if not filename:
-        from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"report_{timestamp}.pdf"
     try:
@@ -627,36 +508,30 @@ def generate_pdf_report(project_data, plan_svg_string=None, analysis_results=Non
         heading_style = styles["Heading2"]
 
         story = []
-        # Title
         story.append(Paragraph("DRUM Studio Structural Report", title_style))
         story.append(Spacer(1, 12))
-        # Project info
         if project_data:
             for key, value in project_data.items():
                 story.append(Paragraph(f"<b>{key}:</b> {value}", normal_style))
             story.append(Spacer(1, 12))
 
-        # Plan image
         if plan_svg_string:
             try:
-                # Convert SVG to reportlab drawing
                 drawing = svg2rlg(BytesIO(plan_svg_string.encode('utf-8')))
                 if drawing:
-                    drawing.scale(0.5, 0.5)  # adjust size
+                    drawing.scale(0.5, 0.5)
                     story.append(Paragraph("Floor Plan", heading_style))
                     story.append(drawing)
                     story.append(Spacer(1, 12))
             except Exception as e:
                 story.append(Paragraph(f"Plan image could not be rendered: {e}", normal_style))
 
-        # Analysis results
         if analysis_results:
             story.append(Paragraph("Structural Analysis Results", heading_style))
             for key, value in analysis_results.items():
                 story.append(Paragraph(f"<b>{key}:</b> {value}", normal_style))
             story.append(Spacer(1, 12))
 
-        # Cost breakdown
         if cost_breakdown:
             story.append(Paragraph("Cost Estimate", heading_style))
             table_data = [["Item", "Cost (USD)"]]
@@ -679,26 +554,16 @@ def generate_pdf_report(project_data, plan_svg_string=None, analysis_results=Non
     except Exception as e:
         return None, str(e)
 
-
 # ======================
-# BEAM DIAGRAM FUNCTIONS (Moment / Shear)
+# VISUALISATION FUNCTIONS
 # ======================
 def plot_beam_diagrams(beam_type, span_m, load_type, load_value, point_load_pos=None):
-    """
-    Generate moment and shear diagrams using matplotlib.
-    beam_type: 'simply_supported' or 'cantilever'
-    load_type: 'udl' or 'point' or 'none'
-    load_value: UDL in kN/m or point load in kN
-    point_load_pos: for point load, distance from left support (m)
-    Returns a matplotlib figure.
-    """
-    x = [i/100 for i in range(int(span_m*100)+1)]  # 0 to L in 0.01 m steps
+    x = [i/100 for i in range(int(span_m*100)+1)]
     V = [0]*len(x)
     M = [0]*len(x)
     L = span_m
 
     if beam_type == 'simply_supported':
-        # Reactions
         if load_type == 'udl':
             w = load_value
             R1 = R2 = w * L / 2
@@ -710,18 +575,13 @@ def plot_beam_diagrams(beam_type, span_m, load_type, load_value, point_load_pos=
             R2 = P * a / L
         else:
             R1 = R2 = 0
-
-        # Shear and moment
         for i, xi in enumerate(x):
-            # Shear due to left reaction
             V[i] = R1
-            # subtract loads to the left of xi
             if load_type == 'udl':
                 V[i] -= w * xi
             elif load_type == 'point':
                 if xi >= a:
                     V[i] -= P
-            # Moment = R1*xi - (load effect)
             M[i] = R1 * xi
             if load_type == 'udl':
                 M[i] -= w * xi**2 / 2
@@ -729,7 +589,6 @@ def plot_beam_diagrams(beam_type, span_m, load_type, load_value, point_load_pos=
                 M[i] -= P * (xi - a)
 
     elif beam_type == 'cantilever':
-        # Fixed end at x=0, free at x=L
         if load_type == 'udl':
             w = load_value
             for i, xi in enumerate(x):
@@ -748,8 +607,9 @@ def plot_beam_diagrams(beam_type, span_m, load_type, load_value, point_load_pos=
         else:
             V = [0]*len(x)
             M = [0]*len(x)
+    else:
+        return None
 
-    # Create figure
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
     ax1.plot(x, V, 'b-', linewidth=2)
     ax1.set_title("Shear Force Diagram")
@@ -765,32 +625,20 @@ def plot_beam_diagrams(beam_type, span_m, load_type, load_value, point_load_pos=
     plt.tight_layout()
     return fig
 
-
 def plot_truss_deformed(nodes, elements, displacements, scale_factor=50):
-    """
-    Plot original and deformed truss.
-    nodes: dict node_id -> (x,y) in mm
-    elements: list of (n1,n2,E,A)
-    displacements: dict node_id -> (ux,uy) in mm
-    scale_factor: exaggerate deformations for visibility.
-    """
     fig, ax = plt.subplots(figsize=(8,6))
-    # Original nodes
     for nid, (x,y) in nodes.items():
         ax.plot(x, y, 'ko', markersize=5)
         ax.text(x, y, f' {nid}', fontsize=9)
-    # Original elements
     for (n1,n2,_,_) in elements:
         x1,y1 = nodes[n1]
         x2,y2 = nodes[n2]
         ax.plot([x1,x2], [y1,y2], 'b-', linewidth=1.5, label='Original' if n1==1 and n2==2 else "")
-    # Deformed nodes
     for nid, (x,y) in nodes.items():
         ux,uy = displacements.get(nid, (0,0))
         xd = x + ux * scale_factor
         yd = y + uy * scale_factor
         ax.plot(xd, yd, 'ro', markersize=5)
-    # Deformed elements
     for (n1,n2,_,_) in elements:
         x1,y1 = nodes[n1]
         x2,y2 = nodes[n2]
