@@ -1,32 +1,43 @@
-# 🏗️ DRUM Studio
+# DRUM Studio 🏗️
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.25%2B-FF4B4B?logo=streamlit)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/status-active-brightgreen)
+**Professional Structural Analysis Workstation** built with Streamlit.
 
-**DRUM Studio** is an open‑source structural engineering workstation that runs entirely in your browser.  
-Perform quick, Eurocode‑based design checks for concrete, steel, timber, foundations, retaining walls, and more – with full support for **metric and imperial units**.
+DRUM Studio provides structural engineers with an interactive platform to design building floor plans, perform structural calculations, and manage projects—all in a single web application.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/jameswol-ai/Drum/main/assets/screenshot.png" width="800" alt="DRUM Studio dashboard"/>
-</p>
+---
 
-## ✨ Key Features
+## ✨ Features
 
-- **Interactive 3D building viewer** – rotate, zoom, and pan your structural model in real time.
-- **2D floor plan** generated automatically from parametric rooms.
-- **Beam, Column, Slab, Foundation** design checks to Eurocodes (EC2, EC3, EC5).
-- **Pile capacity**, **retaining wall stability**, **prestressed concrete** stress check.
-- **Seismic base shear** and **wind load** estimation.
-- **PDF report export** of analysis results.
-- **Project management** – save, open, and archive multiple designs per user.
-- **User authentication** (optional) for multi‑user access.
-- **Dark, modern UI** with a professional engineering aesthetic.
+- **User authentication** with secure password hashing (werkzeug)
+- **Project dashboard** with:
+  - 2D floor plan editor (add/remove/modify rooms)
+  - Interactive 3D model (Three.js)
+  - Grid overlay, north arrow, and dimension labels
+  - Room nudging (arrow-key style movement)
+  - Color picker for each room
+  - Live area breakdown per room
+  - Cost & material estimate
+  - Project comparison
+  - Export to SVG and PDF
+- **Structural Analysis Workstation** with calculators for:
+  - Reinforced concrete and steel beams
+  - RC columns
+  - Slab thickness estimation
+  - Pad footing sizing
+  - Walls & finishes (weights, U-values, sound reduction)
+  - Pile capacity (simplified EC7)
+  - Prestressed concrete stress checks
+  - Retaining wall stability
+  - Truss solver (placeholder)
+- **Unit conversion** – metric/imperial toggle across all inputs/outputs
+- **Random plan generator** – instantly create a multi‑room layout
+- **Archive view** to browse saved projects
 
-## 🚀 Quick Start
+---
+
+## 🚀 Installation (Local)
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/jameswol-ai/Drum.git
-   cd Drum
+   git clone https://github.com/your-username/drum.git
+   cd drum
