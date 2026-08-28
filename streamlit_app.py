@@ -330,19 +330,21 @@ def update_building_plan(building, mem, username):
             break
     save_memory(username, mem)
 
-def generate_random_plan(building, num_rooms=4, grid_spacing_mm=500):
+def generate_safe_plan(building, num_rooms=4, grid_spacing_mm=500):
+    """Generate a safe floor plan with all rooms within 800x500 bounds."""
     colors = [
         "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
         "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
     ]
     plan = []
     
-    hall_w = random.randint(400, 600)
-    hall_h = random.randint(400, 600)
-    hall_w = round(hall_w / grid_spacing_mm) * grid_spacing_mm
-    hall_h = round(hall_h / grid_spacing_mm) * grid_spacing_mm
-    hall_x = round((400 - hall_w // 2) / grid_spacing_mm) * grid_spacing_mm
-    hall_y = round((250 - hall_h // 2) / grid_spacing_mm) * grid_spacing_mm
+    # Central hall
+    hall_w = min(600, max(grid_spacing_mm, round(random.randint(400, 600) / grid_spacing_mm) * grid_spacing_mm))
+    hall_h = min(500, max(grid_spacing_mm, round(random.randint(400, 500) / grid_spacing_mm) * grid_spacing_mm))
+    hall_x = max(0, round((400 - hall_w // 2) / grid_spacing_mm) * grid_spacing_mm)
+    hall_y = max(0, round((250 - hall_h // 2) / grid_spacing_mm) * grid_spacing_mm)
+    hall_x = min(hall_x, 800 - hall_w)
+    hall_y = min(hall_y, 500 - hall_h)
     
     plan.append({
         "x": hall_x, "y": hall_y, "w": hall_w, "h": hall_h,
@@ -354,10 +356,9 @@ def generate_random_plan(building, num_rooms=4, grid_spacing_mm=500):
         parent = random.choice(plan)
         dir = random.choice(directions)
         
-        new_w = random.randint(200, 500)
-        new_h = random.randint(200, 500)
-        new_w = round(new_w / grid_spacing_mm) * grid_spacing_mm
-        new_h = round(new_h / grid_spacing_mm) * grid_spacing_mm
+        # Safe dimensions
+        new_w = min(600, max(grid_spacing_mm, round(random.randint(200, 600) / grid_spacing_mm) * grid_spacing_mm))
+        new_h = min(400, max(grid_spacing_mm, round(random.randint(200, 400) / grid_spacing_mm) * grid_spacing_mm))
         
         gap = grid_spacing_mm
         
@@ -374,14 +375,15 @@ def generate_random_plan(building, num_rooms=4, grid_spacing_mm=500):
             new_x = parent["x"] + parent["w"] + gap
             new_y = parent["y"] + (parent["h"] - new_h) // 2
         
-        new_x = round(new_x / grid_spacing_mm) * grid_spacing_mm
-        new_y = round(new_y / grid_spacing_mm) * grid_spacing_mm
-        
+        # Clamp to bounds
         new_x = max(0, min(new_x, 800 - new_w))
         new_y = max(0, min(new_y, 500 - new_h))
         
+        # Align to grid
         new_x = round(new_x / grid_spacing_mm) * grid_spacing_mm
         new_y = round(new_y / grid_spacing_mm) * grid_spacing_mm
+        new_x = max(0, min(new_x, 800 - new_w))
+        new_y = max(0, min(new_y, 500 - new_h))
         
         overlap = False
         for r in plan:
@@ -397,9 +399,6 @@ def generate_random_plan(building, num_rooms=4, grid_spacing_mm=500):
             })
     building.plan = plan
 
-# ======================
-# NEWS DATA
-# ======================
 def get_engineering_news():
     """Return a list of engineering and structural analysis news items."""
     news = [
@@ -422,16 +421,6 @@ def get_engineering_news():
             "title": "AI in Structural Analysis: Machine Learning for Design",
             "date": "2024-09-20",
             "summary": "Machine learning algorithms are being integrated into structural analysis software, enabling faster optimization of building designs and more accurate failure prediction."
-        },
-        {
-            "title": "Seismic Design Guidelines Updated",
-            "date": "2024-09-01",
-            "summary": "New seismic design guidelines incorporate lessons learned from recent earthquakes. The updates focus on improved ductility requirements and better performance-based design methods."
-        },
-        {
-            "title": "3D Printing in Construction: Structural Applications",
-            "date": "2024-08-15",
-            "summary": "3D-printed concrete structures are moving from experimental to practical applications. Engineers are developing new design approaches for printed structural elements."
         },
     ]
     return news
@@ -609,7 +598,7 @@ if page == "Project Dashboard":
         if is_engineer(user_data):
             if st.button("New Project", use_container_width=True):
                 new_building = Building(name=f"Project-{len(mem['buildings'])+1}", score=50)
-                generate_plan(new_building)
+                generate_safe_plan(new_building, num_rooms=4, grid_spacing_mm=500)
                 mem["buildings"].append(new_building.to_dict())
                 st.session_state.active_building = new_building
                 st.session_state.show_grid = True
@@ -619,7 +608,7 @@ if page == "Project Dashboard":
                 st.rerun()
             if st.button("Generate Random Plan", use_container_width=True):
                 new_building = Building(name=f"Random-{len(mem['buildings'])+1}", score=60)
-                generate_random_plan(new_building, num_rooms=random.randint(4, 8), grid_spacing_mm=500)
+                generate_safe_plan(new_building, num_rooms=random.randint(4, 8), grid_spacing_mm=500)
                 mem["buildings"].append(new_building.to_dict())
                 st.session_state.active_building = new_building
                 st.session_state.show_grid = True
@@ -687,7 +676,7 @@ if page == "Project Dashboard":
         st.markdown("---")
         st.markdown("### Engineering News")
         news_items = get_engineering_news()
-        for news in news_items[:4]:  # Show top 4 news items
+        for news in news_items[:4]:
             st.markdown(f"""
             <div class="news-card">
                 <div class="news-title">{news['title']}</div>
@@ -710,8 +699,7 @@ if page == "Project Dashboard":
                         if st.session_state.unit_system == "metric":
                             disp_spacing = st.session_state.grid_spacing_mm / 1000.0
                             label = "Grid spacing (m)"
-                            step = 0.1
-                        else:
+                            step = 0.1                        else:
                             disp_spacing = st.session_state.grid_spacing_mm / 304.8
                             label = "Grid spacing (ft)"
                             step = 1.0
@@ -746,14 +734,18 @@ if page == "Project Dashboard":
                     col_edit1, col_edit2 = st.columns(2)
                     with col_edit1:
                         if st.button("Add Random Room"):
-                            w = random.randint(100, 800)
-                            h = random.randint(100, 500)
-                            w = round(w / 500) * 500
-                            h = round(h / 500) * 500
-                            x = random.randint(0, 800 - w)
-                            y = random.randint(0, 500 - h)
-                            x = round(x / 500) * 500
-                            y = round(y / 500) * 500
+                            w = random.randint(100, 700)
+                            h = random.randint(100, 400)
+                            w = max(100, round(w / 500) * 500)
+                            h = max(100, round(h / 500) * 500)
+                            w = min(w, 800)
+                            h = min(h, 500)
+                            x = random.randint(0, max(0, 800 - w))
+                            y = random.randint(0, max(0, 500 - h))
+                            x = max(0, round(x / 500) * 500)
+                            y = max(0, round(y / 500) * 500)
+                            x = min(x, 800 - w)
+                            y = min(y, 500 - h)
                             color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
                             plan.append({
                                 "x": x, "y": y, "w": w, "h": h,
@@ -778,19 +770,43 @@ if page == "Project Dashboard":
                         with st.container():
                             cols = st.columns([2, 1, 1, 1, 1, 1])
                             cols[0].write(room["name"])
-                            new_w = cols[1].number_input("W", 100, 800, room["w"], key=f"rw_{i}")
-                            new_h = cols[2].number_input("H", 100, 500, room["h"], key=f"rh_{i}")
-                            new_x = cols[3].number_input("X", 0, 800 - room["w"], room["x"], key=f"rx_{i}")
-                            new_y = cols[4].number_input("Y", 0, 500 - room["h"], room["y"], key=f"ry_{i}")
-                            new_color = cols[5].color_picker("", value=room.get("color", "#4f46e5"), key=f"rc_{i}")
+                            
+                            safe_w = max(100, min(room["w"], 800))
+                            safe_h = max(100, min(room["h"], 500))
+                            safe_x = max(0, min(room["x"], 800 - safe_w))
+                            safe_y = max(0, min(room["y"], 500 - safe_h))
+                            
+                            new_w = cols[1].number_input(
+                                "W", min_value=100, max_value=800,
+                                value=safe_w, key=f"rw_{i}"
+                            )
+                            new_h = cols[2].number_input(
+                                "H", min_value=100, max_value=500,
+                                value=safe_h, key=f"rh_{i}"
+                            )
+                            new_x = cols[3].number_input(
+                                "X", min_value=0, max_value=max(0, 800 - new_w),
+                                value=safe_x, key=f"rx_{i}"
+                            )
+                            new_y = cols[4].number_input(
+                                "Y", min_value=0, max_value=max(0, 500 - new_h),
+                                value=safe_y, key=f"ry_{i}"
+                            )
+                            new_color = cols[5].color_picker(
+                                "", value=room.get("color", "#4f46e5"), key=f"rc_{i}"
+                            )
+                            
                             changed = False
-                            if new_w != room["w"] or new_h != room["h"] or new_x != room["x"] or new_y != room["y"] or new_color != room["color"]:
+                            if (new_w != safe_w or new_h != safe_h or 
+                                new_x != safe_x or new_y != safe_y or 
+                                new_color != room.get("color", "#4f46e5")):
                                 plan[i]["w"] = new_w
                                 plan[i]["h"] = new_h
                                 plan[i]["x"] = new_x
                                 plan[i]["y"] = new_y
                                 plan[i]["color"] = new_color
                                 changed = True
+                            
                             if changed:
                                 building.plan = plan
                                 update_building_plan(building, mem, username)
