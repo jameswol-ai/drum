@@ -5,7 +5,28 @@ import uuid
 from datetime import datetime
 from copy import deepcopy
 
-from werkzeug.security import generate_password_hash, check_password_hash
+# Remove this line:
+# from werkzeug.security import generate_password_hash, check_password_hash
+
+# Add these functions at the top of main.py instead:
+import hashlib
+import secrets
+
+def generate_password_hash(password):
+    salt = secrets.token_hex(16)
+    hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
+    return f"pbkdf2:sha256:100000${salt}${hash.hex()}"
+
+def check_password_hash(stored_password, provided_password):
+    try:
+        method, salt, hashval = stored_password.split('$')
+        # method format: pbkdf2:sha256:100000
+        algorithm = method.split(':')[1]
+        iterations = int(method.split(':')[2])
+        new_hash = hashlib.pbkdf2_hmac(algorithm, provided_password.encode('utf-8'), salt.encode('utf-8'), iterations)
+        return new_hash.hex() == hashval
+    except Exception:
+        return False
 
 # ---------- File paths ----------
 DATA_DIR = os.path.dirname(os.path.abspath(__file__))
