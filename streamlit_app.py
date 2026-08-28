@@ -1,24 +1,19 @@
 # streamlit_app.py
-# DRUM Studio – Professional Structural Analysis Workstation
-
-from engineering import (
-    # ... existing imports ...
-    generate_pdf_report, plot_beam_diagrams, plot_truss_deformed
-)
-import matplotlib.pyplot as plt
-
 import streamlit as st
 import uuid
 from datetime import datetime
 import random
 import math
 import os
+import json
+import matplotlib.pyplot as plt
 
 from main import (
     load_users, save_users, get_user, create_user, authenticate,
     update_user_data, xp_for_level, add_xp, load_memory, save_memory,
     log_event, Building, generate_plan, simulate_evolution, generate_rhythm,
-    init_quests, update_quests, grant_quest_rewards, DEFAULT_STATE
+    init_quests, update_quests, grant_quest_rewards, DEFAULT_STATE,
+    list_users, update_user_role, delete_user, is_admin, is_engineer
 )
 from engineering import (
     CONCRETE_GRADES, STEEL_GRADES, TIMBER_CLASSES, WALL_TYPES, FINISHES,
@@ -31,15 +26,14 @@ from engineering import (
     check_prestressed_beam,
     generate_analysis_report,
     retaining_wall_stability,
-    truss_analysis, load_combinations, seismic_base_shear, steel_connection_check
+    truss_analysis, load_combinations, seismic_base_shear, steel_connection_check,
+    generate_pdf_report, plot_beam_diagrams, plot_truss_deformed
 )
 
-# ---------- Page Config ----------
 st.set_page_config(page_title="DRUM Studio", page_icon="🏗️", layout="wide",
                    initial_sidebar_state="expanded",
                    menu_items={"Get Help": None, "Report a bug": None, "About": None})
 
-# ---------- Session State ----------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.username = None
@@ -64,7 +58,6 @@ if "logged_in" not in st.session_state:
     st.session_state.show_north = False
     st.session_state.show_dimensions = True
 
-# ---------- Admin user creation ----------
 if not load_users():
     admin_user = os.environ.get("DRUM_ADMIN_USER", "admin")
     admin_pass = os.environ.get("DRUM_ADMIN_PASS", None)
@@ -73,7 +66,6 @@ if not load_users():
         print("WARNING: Using default admin password. Set DRUM_ADMIN_PASS env variable.")
     create_user(admin_user, admin_pass, role="admin")
 
-# ---------- CSS ----------
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -99,7 +91,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
 .stSelectbox>div>div>select {
     background: #1E293B; color: #F8FAFC;
 }
-/* Improved tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px;
 }
@@ -113,14 +104,12 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     background-color: #334155;
     color: #F8FAFC;
 }
-/* Card-like containers */
 .stExpander {
     background: #1E293B;
     border: 1px solid #334155;
     border-radius: 12px;
     margin-bottom: 10px;
 }
-/* Tables */
 .stTable {
     background: #1E293B;
     border-radius: 8px;
@@ -129,7 +118,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Unit Helpers ----------
 def input_metric(value, unit_type):
     if st.session_state.unit_system == "imperial":
         conversions = {
@@ -174,7 +162,6 @@ def unit_label(unit_type):
     }
     return labels.get(unit_type, "")
 
-# ---------- SVG Generator ----------
 def generate_svg_string(plan, width=800, height=500,
                         show_grid=False, grid_spacing_mm=1000,
                         show_north=False, orientation="north",
@@ -301,15 +288,13 @@ if not st.session_state.logged_in:
                 login_btn = st.form_submit_button("🔑 Login", use_container_width=True)
             with col2_btn:
                 register_btn = st.form_submit_button("✨ Register", use_container_width=True)
-
             if login_btn:
                 user = authenticate(uname, pwd)
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.username = uname
                     st.session_state.user_data = user
-                    mem = load_memory(uname)
-                    st.session_state.memory = mem
+                    st.session_state.memory = load_memory(uname)
                     st.rerun()
                 else:
                     st.error("Invalid credentials.")
@@ -318,7 +303,7 @@ if not st.session_state.logged_in:
                     st.error("Fill all fields.")
                 else:
                     try:
-                        create_user(uname, pwd)
+                        create_user(uname, pwd, role="engineer")  # default to engineer
                         st.success("Account created! You can now log in.")
                     except ValueError as e:
                         st.error(str(e))
@@ -331,7 +316,6 @@ username = st.session_state.username
 user_data = st.session_state.user_data
 mem = st.session_state.memory
 
-# ----- SIDEBAR -----
 with st.sidebar:
     st.markdown("""
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
@@ -353,29 +337,51 @@ with st.sidebar:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
     st.markdown(f"### 👷 {username}")
-    st.caption("Structural Engineer")
-
+    st.caption(f"Role: {user_data.get('role', 'viewer')}")
     st.markdown("---")
     page = st.radio("Navigate",
                     ["Project Dashboard", "Structural Analysis", "Archives"],
                     index=["Project Dashboard", "Structural Analysis", "Archives"].index(st.session_state.page),
                     key="nav_radio")
     st.session_state.page = page
-
     unit_choice = st.radio("Unit System", ["metric", "imperial"], index=0, key="unit_radio")
     st.session_state.unit_system = unit_choice
 
     with st.expander("🔧 Analysis Defaults"):
         st.session_state.eng_params["live_load"] = st.number_input(
-            f"Live Load ({unit_label('pressure')})", 1.0, 10.0, 2.5, 0.5, key="live_load")
+            f"Live Load ({unit_label('pressure')})", 1.0, 10.0, st.session_state.eng_params["live_load"], 0.5, key="live_load")
         st.session_state.eng_params["slab_thickness"] = st.number_input(
-            f"Slab Thickness ({unit_label('length')})", 0.1, 0.5, 0.2, 0.05, key="slab_thick")
+            f"Slab Thickness ({unit_label('length')})", 0.1, 0.5, st.session_state.eng_params["slab_thickness"], 0.05, key="slab_thick")
         st.session_state.eng_params["additional_dead"] = st.number_input(
-            f"Additional Dead ({unit_label('pressure')})", 0.0, 5.0, 1.0, 0.1, key="add_dead")
-        st.session_state.eng_params["glazing_ratio"] = st.slider("Glazing Ratio", 0.05, 0.8, 0.2, key="glaz_ratio")
+            f"Additional Dead ({unit_label('pressure')})", 0.0, 5.0, st.session_state.eng_params["additional_dead"], 0.1, key="add_dead")
+        st.session_state.eng_params["glazing_ratio"] = st.slider("Glazing Ratio", 0.05, 0.8, st.session_state.eng_params["glazing_ratio"], key="glaz_ratio")
         st.session_state.eng_params["orientation"] = st.selectbox("Orientation", ["north","south","east","west"], key="orient")
+
+    if is_admin(user_data):
+        with st.expander("👥 User Management"):
+            users_list = list_users()
+            st.write("**Existing users**")
+            for u in users_list:
+                col_u1, col_u2, col_u3 = st.columns([2,1,1])
+                col_u1.write(u["username"])
+                new_role = col_u2.selectbox("Role", ["admin","engineer","viewer"],
+                                            index=["admin","engineer","viewer"].index(u["role"]),
+                                            key=f"role_{u['username']}")
+                if new_role != u["role"]:
+                    try:
+                        update_user_role(u["username"], new_role)
+                        st.success(f"Role updated for {u['username']}")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
+                if col_u3.button("Delete", key=f"deluser_{u['username']}"):
+                    try:
+                        delete_user(u["username"])
+                        st.success(f"Deleted {u['username']}")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
 
     if st.button("🚪 Logout"):
         save_memory(username, mem)
@@ -419,23 +425,25 @@ if page == "Project Dashboard":
 
     with left_col:
         st.markdown("### 🧰 Project Tools")
-        if st.button("➕ New Project", use_container_width=True):
-            new_building = Building(name=f"Project-{len(mem['buildings'])+1}", score=50)
-            generate_plan(new_building)
-            mem["buildings"].append(new_building.to_dict())
-            st.session_state.active_building = new_building
-            log_event(username, mem, f"Created new project: {new_building.name}")
-            save_memory(username, mem)
-            st.rerun()
-
-        if st.button("🎲 Generate Random Plan", use_container_width=True):
-            new_building = Building(name=f"Random-{len(mem['buildings'])+1}", score=60)
-            generate_random_plan(new_building, num_rooms=random.randint(4, 8))
-            mem["buildings"].append(new_building.to_dict())
-            st.session_state.active_building = new_building
-            log_event(username, mem, f"Generated random plan: {new_building.name}")
-            save_memory(username, mem)
-            st.rerun()
+        if is_engineer(user_data):
+            if st.button("➕ New Project", use_container_width=True):
+                new_building = Building(name=f"Project-{len(mem['buildings'])+1}", score=50)
+                generate_plan(new_building)
+                mem["buildings"].append(new_building.to_dict())
+                st.session_state.active_building = new_building
+                log_event(username, mem, f"Created new project: {new_building.name}")
+                save_memory(username, mem)
+                st.rerun()
+            if st.button("🎲 Generate Random Plan", use_container_width=True):
+                new_building = Building(name=f"Random-{len(mem['buildings'])+1}", score=60)
+                generate_random_plan(new_building, num_rooms=random.randint(4, 8))
+                mem["buildings"].append(new_building.to_dict())
+                st.session_state.active_building = new_building
+                log_event(username, mem, f"Generated random plan: {new_building.name}")
+                save_memory(username, mem)
+                st.rerun()
+        else:
+            st.info("Viewer access – editing disabled.")
 
         if mem["buildings"]:
             st.markdown("**Saved Projects**")
@@ -446,13 +454,14 @@ if page == "Project Dashboard":
                     if st.button(f"📂 {b.name}", key=f"sel_{b.id}"):
                         st.session_state.active_building = b
                         st.rerun()
-                with col_b:
-                    if st.button("🗑️", key=f"del_{b.id}"):
-                        mem["buildings"] = [x for x in mem["buildings"] if x["id"] != b.id]
-                        if st.session_state.active_building and st.session_state.active_building.id == b.id:
-                            st.session_state.active_building = None
-                        save_memory(username, mem)
-                        st.rerun()
+                if is_engineer(user_data):
+                    with col_b:
+                        if st.button("🗑️", key=f"del_{b.id}"):
+                            mem["buildings"] = [x for x in mem["buildings"] if x["id"] != b.id]
+                            if st.session_state.active_building and st.session_state.active_building.id == b.id:
+                                st.session_state.active_building = None
+                            save_memory(username, mem)
+                            st.rerun()
 
         st.markdown("---")
         st.markdown("### 📊 Compare Projects")
@@ -534,85 +543,86 @@ if page == "Project Dashboard":
             else:
                 st.info("No plan data.")
 
-            with st.expander("✏️ Edit Plan (Add / Remove / Modify Rooms)", expanded=False):
-                col_edit1, col_edit2 = st.columns(2)
-                with col_edit1:
-                    if st.button("➕ Add Random Room"):
-                        w = random.randint(100, 200) * 5
-                        h = random.randint(100, 200) * 5
-                        x = random.randint(0, 700)
-                        y = random.randint(0, 400)
-                        color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
-                        plan.append({
-                            "x": x, "y": y, "w": w, "h": h,
-                            "name": f"Room {len(plan)+1}",
-                            "color": color_hex
-                        })
-                        building.plan = plan
-                        update_building_plan(building, mem, username)
-                        st.rerun()
-                with col_edit2:
-                    if len(plan) > 1:
+            if is_engineer(user_data):
+                with st.expander("✏️ Edit Plan (Add / Remove / Modify Rooms)", expanded=False):
+                    col_edit1, col_edit2 = st.columns(2)
+                    with col_edit1:
+                        if st.button("➕ Add Random Room"):
+                            w = random.randint(100, 200) * 5
+                            h = random.randint(100, 200) * 5
+                            x = random.randint(0, 700)
+                            y = random.randint(0, 400)
+                            color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
+                            plan.append({
+                                "x": x, "y": y, "w": w, "h": h,
+                                "name": f"Room {len(plan)+1}",
+                                "color": color_hex
+                            })
+                            building.plan = plan
+                            update_building_plan(building, mem, username)
+                            st.rerun()
+                    with col_edit2:
+                        if len(plan) > 1:
+                            room_names = [r["name"] for r in plan]
+                            room_to_remove = st.selectbox("Remove room", room_names, key="remove_room")
+                            if st.button("🗑️ Remove Selected"):
+                                plan = [r for r in plan if r["name"] != room_to_remove]
+                                building.plan = plan
+                                update_building_plan(building, mem, username)
+                                st.rerun()
+
+                    st.write("**Room properties**")
+                    for i, room in enumerate(plan):
+                        with st.container():
+                            cols = st.columns([2, 1, 1, 1, 1, 1])
+                            cols[0].write(room["name"])
+                            new_w = cols[1].number_input("W", 100, 2000, room["w"], key=f"rw_{i}")
+                            new_h = cols[2].number_input("H", 100, 2000, room["h"], key=f"rh_{i}")
+                            new_x = cols[3].number_input("X", 0, 800, room["x"], key=f"rx_{i}")
+                            new_y = cols[4].number_input("Y", 0, 500, room["y"], key=f"ry_{i}")
+                            new_color = cols[5].color_picker("", value=room.get("color", "#4f46e5"), key=f"rc_{i}")
+                            changed = False
+                            if new_w != room["w"] or new_h != room["h"] or new_x != room["x"] or new_y != room["y"] or new_color != room["color"]:
+                                plan[i]["w"] = new_w
+                                plan[i]["h"] = new_h
+                                plan[i]["x"] = new_x
+                                plan[i]["y"] = new_y
+                                plan[i]["color"] = new_color
+                                changed = True
+                            if changed:
+                                building.plan = plan
+                                update_building_plan(building, mem, username)
+                                st.rerun()
+
+                    if plan:
+                        st.markdown("---")
+                        st.markdown("**↕️ Nudge selected room**")
                         room_names = [r["name"] for r in plan]
-                        room_to_remove = st.selectbox("Remove room", room_names, key="remove_room")
-                        if st.button("🗑️ Remove Selected"):
-                            plan = [r for r in plan if r["name"] != room_to_remove]
+                        nudge_room = st.selectbox("Select room", room_names, key="nudge_room_sel")
+                        nudge_step = st.number_input("Step (mm)", value=100, step=10, key="nudge_step")
+                        col_n1, col_n2, col_n3, col_n4 = st.columns(4)
+                        idx = next(i for i, r in enumerate(plan) if r["name"] == nudge_room)
+                        room = plan[idx]
+                        if col_n1.button("⬅️ Left", key="nudge_left"):
+                            plan[idx]["x"] = max(0, room["x"] - nudge_step)
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
-
-                st.write("**Room properties**")
-                for i, room in enumerate(plan):
-                    with st.container():
-                        cols = st.columns([2, 1, 1, 1, 1, 1])
-                        cols[0].write(room["name"])
-                        new_w = cols[1].number_input("W", 100, 2000, room["w"], key=f"rw_{i}")
-                        new_h = cols[2].number_input("H", 100, 2000, room["h"], key=f"rh_{i}")
-                        new_x = cols[3].number_input("X", 0, 800, room["x"], key=f"rx_{i}")
-                        new_y = cols[4].number_input("Y", 0, 500, room["y"], key=f"ry_{i}")
-                        new_color = cols[5].color_picker("", value=room.get("color", "#4f46e5"), key=f"rc_{i}")
-                        changed = False
-                        if new_w != room["w"] or new_h != room["h"] or new_x != room["x"] or new_y != room["y"] or new_color != room["color"]:
-                            plan[i]["w"] = new_w
-                            plan[i]["h"] = new_h
-                            plan[i]["x"] = new_x
-                            plan[i]["y"] = new_y
-                            plan[i]["color"] = new_color
-                            changed = True
-                        if changed:
+                        if col_n2.button("➡️ Right", key="nudge_right"):
+                            plan[idx]["x"] = room["x"] + nudge_step
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
-
-                if plan:
-                    st.markdown("---")
-                    st.markdown("**↕️ Nudge selected room**")
-                    room_names = [r["name"] for r in plan]
-                    nudge_room = st.selectbox("Select room", room_names, key="nudge_room_sel")
-                    nudge_step = st.number_input("Step (mm)", value=100, step=10, key="nudge_step")
-                    col_n1, col_n2, col_n3, col_n4 = st.columns(4)
-                    idx = next(i for i, r in enumerate(plan) if r["name"] == nudge_room)
-                    room = plan[idx]
-                    if col_n1.button("⬅️ Left", key="nudge_left"):
-                        plan[idx]["x"] = max(0, room["x"] - nudge_step)
-                        building.plan = plan
-                        update_building_plan(building, mem, username)
-                        st.rerun()
-                    if col_n2.button("➡️ Right", key="nudge_right"):
-                        plan[idx]["x"] = room["x"] + nudge_step
-                        building.plan = plan
-                        update_building_plan(building, mem, username)
-                        st.rerun()
-                    if col_n3.button("⬆️ Up", key="nudge_up"):
-                        plan[idx]["y"] = max(0, room["y"] - nudge_step)
-                        building.plan = plan
-                        update_building_plan(building, mem, username)
-                        st.rerun()
-                    if col_n4.button("⬇️ Down", key="nudge_down"):
-                        plan[idx]["y"] = room["y"] + nudge_step
-                        building.plan = plan
-                        update_building_plan(building, mem, username)
-                        st.rerun()
+                        if col_n3.button("⬆️ Up", key="nudge_up"):
+                            plan[idx]["y"] = max(0, room["y"] - nudge_step)
+                            building.plan = plan
+                            update_building_plan(building, mem, username)
+                            st.rerun()
+                        if col_n4.button("⬇️ Down", key="nudge_down"):
+                            plan[idx]["y"] = room["y"] + nudge_step
+                            building.plan = plan
+                            update_building_plan(building, mem, username)
+                            st.rerun()
 
             st.markdown("#### 🧊 Interactive 3D Model")
             if plan:
@@ -687,39 +697,35 @@ if page == "Project Dashboard":
                     svg_content = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
                     st.download_button("Download SVG", svg_content, file_name=f"{building.name}_plan.svg", mime="image/svg+xml")
                 if st.button("📊 Export Summary PDF"):
-    # Build project data dict
-    project_data = {
-        "Project Name": building.name,
-        "Engineer": username,
-        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
-        "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
-    }
-    # Analysis results
-    analysis_results = {
-        "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
-        "Suggested Beam": integrity['suggested_beam'],
-        "Structural Integrity": "Pass" if integrity['pass'] else "Fail",
-    }
-    # Cost breakdown
-    cost = estimate_cost(plan)
-    cost_breakdown = {
-        "Concrete": cost["concrete"],
-        "Steel": cost["steel"],
-        "Glass": cost["glass"],
-        "Labor": cost["labor"],
-        "Total": cost["total"],
-    }
-    # Generate plan SVG for embedding
-    plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
-    filename, error = generate_pdf_report(project_data, plan_svg, analysis_results, cost_breakdown,
-                                          filename=f"{building.name}_report.pdf")
-    if error:
-        st.error(error)
-    else:
-        with open(filename, "rb") as f:
-            st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
-        st.success("Report generated!")
+                    project_data = {
+                        "Project Name": building.name,
+                        "Engineer": username,
+                        "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
+                        "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
+                    }
+                    analysis_results = {
+                        "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
+                        "Suggested Beam": integrity['suggested_beam'],
+                        "Structural Integrity": "Pass" if integrity['pass'] else "Fail",
+                    }
+                    cost = estimate_cost(plan)
+                    cost_breakdown = {
+                        "Concrete": cost["concrete"],
+                        "Steel": cost["steel"],
+                        "Glass": cost["glass"],
+                        "Labor": cost["labor"],
+                        "Total": cost["total"],
+                    }
+                    plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
+                    filename, error = generate_pdf_report(project_data, plan_svg, analysis_results, cost_breakdown,
+                                                          filename=f"{building.name}_report.pdf")
+                    if error:
+                        st.error(error)
+                    else:
+                        with open(filename, "rb") as f:
+                            st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
+                        st.success("Report generated!")
 
         else:
             st.info("👈 Select a project from the list or create a new one to start.")
@@ -774,6 +780,25 @@ elif page == "Structural Analysis":
                 else: st.error("❌ Beam fails check")
                 st.write(f"As required: {output_metric(res['As_req'], 'area'):.2f} {unit_label('area')}")
                 st.json(res)
+            # Diagrams
+            st.markdown("---")
+            st.subheader("Beam Diagrams")
+            col_diag1, col_diag2, col_diag3 = st.columns(3)
+            load_type = col_diag1.selectbox("Load type", ["udl", "point", "none"], key="diag_load_type")
+            if load_type == "udl":
+                load_val = col_diag2.number_input("UDL (kN/m)", value=10.0, key="diag_udl")
+                point_pos = 0.0
+            elif load_type == "point":
+                load_val = col_diag2.number_input("Point load (kN)", value=50.0, key="diag_point")
+                point_pos = col_diag3.number_input("Position from left (m)", value=span/2, key="diag_point_pos")
+            else:
+                load_val = 0.0
+                point_pos = 0.0
+            if st.button("Plot Diagrams", key="plot_beam"):
+                fig = plot_beam_diagrams("simply_supported", span, load_type, load_val, point_pos)
+                st.pyplot(fig)
+                plt.close(fig)
+
         elif beam_mat == "Steel":
             grade = st.selectbox("Steel Grade", list(STEEL_GRADES.keys()), key="beam_steel_grade")
             section = st.selectbox("Section", ["IPE 160", "IPE 220", "IPE 300"], key="beam_sec")
@@ -788,6 +813,24 @@ elif page == "Structural Analysis":
                 st.write(f"Utilization: {res['utilization']:.2f}")
                 st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
                 st.json(res)
+            # Diagrams
+            st.markdown("---")
+            st.subheader("Beam Diagrams")
+            col_diag1, col_diag2, col_diag3 = st.columns(3)
+            load_type = col_diag1.selectbox("Load type", ["udl", "point", "none"], key="diag_load_type_steel")
+            if load_type == "udl":
+                load_val = col_diag2.number_input("UDL (kN/m)", value=10.0, key="diag_udl_steel")
+                point_pos = 0.0
+            elif load_type == "point":
+                load_val = col_diag2.number_input("Point load (kN)", value=50.0, key="diag_point_steel")
+                point_pos = col_diag3.number_input("Position from left (m)", value=span/2, key="diag_point_pos_steel")
+            else:
+                load_val = 0.0
+                point_pos = 0.0
+            if st.button("Plot Diagrams", key="plot_beam_steel"):
+                fig = plot_beam_diagrams("simply_supported", span, load_type, load_val, point_pos)
+                st.pyplot(fig)
+                plt.close(fig)
 
     # ---- COLUMNS ----
     with tabs[1]:
@@ -969,6 +1012,10 @@ elif page == "Structural Analysis":
                         react_data["Rx"].append(f"{rx:.3f}")
                         react_data["Ry"].append(f"{ry:.3f}")
                     st.table(react_data)
+                    if st.button("Plot Deformed Shape", key="plot_truss"):
+                        fig = plot_truss_deformed(nodes, elements, result["displacements"])
+                        st.pyplot(fig)
+                        plt.close(fig)
 
     # ---- STEEL CONNECTIONS ----
     with tabs[9]:
@@ -1041,26 +1088,46 @@ elif page == "Structural Analysis":
     with tabs[12]:
         st.subheader("Export Analysis Report (PDF)")
         if st.button("📄 Generate Report", key="pdf_gen"):
-            report_data = {"Project": "DRUM Sample", "Analysis": "Summary of last checks"}
             if st.session_state.active_building:
-                plan = st.session_state.active_building.plan
+                building = st.session_state.active_building
+                plan = building.plan
                 area = calculate_total_area(plan)
                 load = compute_floor_loads(plan,
                     live_load_kN_per_m2=st.session_state.eng_params["live_load"],
                     slab_thickness_m=st.session_state.eng_params["slab_thickness"],
                     additional_dead_load_kN_per_m2=st.session_state.eng_params["additional_dead"])
-                report_data["Total Floor Area"] = f"{output_metric(area, 'area'):.1f} {unit_label('area')}"
-                report_data["Design Load"] = f"{output_metric(load, 'force'):.1f} {unit_label('force')}"
                 integrity = check_structural_integrity(plan)
-                report_data["Max Span"] = f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}"
-                report_data["Suggested Beam"] = integrity["suggested_beam"]
-            filename, error = generate_analysis_report(report_data)
-            if error:
-                st.error(error)
+                cost = estimate_cost(plan)
+                project_data = {
+                    "Project Name": building.name,
+                    "Engineer": username,
+                    "Date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "Total Area": f"{output_metric(area, 'area'):.1f} {unit_label('area')}",
+                    "Design Load": f"{output_metric(load, 'force'):.1f} {unit_label('force')}",
+                }
+                analysis_results = {
+                    "Max Span": f"{output_metric(integrity['max_span_m'], 'length'):.2f} {unit_label('length')}",
+                    "Suggested Beam": integrity['suggested_beam'],
+                    "Structural Integrity": "Pass" if integrity['pass'] else "Fail",
+                }
+                cost_breakdown = {
+                    "Concrete": cost["concrete"],
+                    "Steel": cost["steel"],
+                    "Glass": cost["glass"],
+                    "Labor": cost["labor"],
+                    "Total": cost["total"],
+                }
+                plan_svg = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
+                filename, error = generate_pdf_report(project_data, plan_svg, analysis_results, cost_breakdown,
+                                                      filename=f"{building.name}_report.pdf")
+                if error:
+                    st.error(error)
+                else:
+                    with open(filename, "rb") as f:
+                        st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
+                    st.success("Report generated!")
             else:
-                with open(filename, "rb") as f:
-                    st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
-                st.success("Report generated!")
+                st.info("No active building. Open a project first.")
 
     # ---- Building Integration ----
     st.markdown("---")
