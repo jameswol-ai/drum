@@ -24,7 +24,7 @@ from engineering import (
     check_prestressed_beam,
     generate_analysis_report,
     retaining_wall_stability,
-    truss_method_of_joints,
+    truss_analysis, load_combinations, seismic_base_shear, steel_connection_check
 )
 
 # ---------- Page Config ----------
@@ -57,12 +57,11 @@ if "logged_in" not in st.session_state:
     st.session_state.show_north = False
     st.session_state.show_dimensions = True
 
-# ---------- Admin user creation (secure) ----------
+# ---------- Admin user creation ----------
 if not load_users():
     admin_user = os.environ.get("DRUM_ADMIN_USER", "admin")
     admin_pass = os.environ.get("DRUM_ADMIN_PASS", None)
     if admin_pass is None:
-        # Only for local dev; in production always set DRUM_ADMIN_PASS
         admin_pass = "admin123"
         print("WARNING: Using default admin password. Set DRUM_ADMIN_PASS env variable.")
     create_user(admin_user, admin_pass, role="admin")
@@ -92,6 +91,33 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
 }
 .stSelectbox>div>div>select {
     background: #1E293B; color: #F8FAFC;
+}
+/* Improved tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+}
+.stTabs [data-baseweb="tab"] {
+    background-color: #1E293B;
+    border-radius: 8px 8px 0 0;
+    padding: 8px 16px;
+    color: #94A3B8;
+}
+.stTabs [aria-selected="true"] {
+    background-color: #334155;
+    color: #F8FAFC;
+}
+/* Card-like containers */
+.stExpander {
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
+/* Tables */
+.stTable {
+    background: #1E293B;
+    border-radius: 8px;
+    overflow: hidden;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -187,7 +213,6 @@ def update_building_plan(building, mem, username):
             break
     save_memory(username, mem)
 
-# ---------- Random Floor Plan Generator ----------
 def generate_random_plan(building, num_rooms=4):
     colors = [
         "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
@@ -217,7 +242,7 @@ def generate_random_plan(building, num_rooms=4):
         elif dir == "left":
             new_x = parent["x"] - new_w - 10
             new_y = parent["y"] + (parent["h"] - new_h) // 2
-        else:  # right
+        else:
             new_x = parent["x"] + parent["w"] + 10
             new_y = parent["y"] + (parent["h"] - new_h) // 2
         new_x = max(0, min(new_x, 800 - new_w))
@@ -693,7 +718,8 @@ elif page == "Structural Analysis":
     tabs = st.tabs([
         "📐 Beams", "🧱 Columns", "🔲 Slabs", "🌍 Foundations",
         "🏛️ Walls & Finishes", "📌 Piles", "⚡ Prestressed",
-        "🧱 Retaining Wall", "🔺 Truss", "📄 Export/Report"
+        "🧱 Retaining Wall", "🔺 Truss", "🔩 Connections",
+        "🌪️ Load Combos", "🌍 Seismic", "📄 Export/Report"
     ])
 
     # ---- BEAMS ----
@@ -834,14 +860,152 @@ elif page == "Structural Analysis":
 
     # ---- TRUSS ----
     with tabs[8]:
-        st.subheader("2D Truss Solver (coming soon)")
-        st.info("This module will perform method-of-joints analysis. Enter nodes, members, loads.")
-        if st.button("Solve Truss (demo)", key="truss_solve"):
-            res = truss_method_of_joints(None, None, None, None)
-            st.json(res)
+        st.subheader("2D Truss Solver (Stiffness Method)")
+        st.markdown("Define nodes (x, y in mm), elements (connections), loads (kN), and supports.")
+        col_t1, col_t2 = st.columns(2)
+        with col_t1:
+            n_nodes = st.number_input("Number of nodes", min_value=2, max_value=20, value=3, key="truss_nnodes")
+        with col_t2:
+            n_elem = st.number_input("Number of elements", min_value=1, max_value=30, value=2, key="truss_nelem")
+
+        nodes = {}
+        st.markdown("**Nodes**")
+        for i in range(int(n_nodes)):
+            c1, c2 = st.columns(2)
+            x = c1.number_input(f"Node {i+1} X (mm)", value=0.0, key=f"tn_{i}_x")
+            y = c2.number_input(f"Node {i+1} Y (mm)", value=0.0, key=f"tn_{i}_y")
+            nodes[i+1] = (x, y)
+
+        elements = []
+        st.markdown("**Elements**")
+        for i in range(int(n_elem)):
+            c1, c2, c3, c4 = st.columns(4)
+            n1 = c1.number_input(f"Elem {i+1} Node1", min_value=1, max_value=n_nodes, value=1, key=f"te_{i}_n1")
+            n2 = c2.number_input(f"Elem {i+1} Node2", min_value=1, max_value=n_nodes, value=2, key=f"te_{i}_n2")
+            E = c3.number_input(f"Elem {i+1} E (MPa)", value=200000.0, key=f"te_{i}_E")
+            A = c4.number_input(f"Elem {i+1} A (mm²)", value=1000.0, key=f"te_{i}_A")
+            elements.append((int(n1), int(n2), E, A))
+
+        loads = {}
+        st.markdown("**Loads (kN)** – leave 0 if none")
+        for i in range(int(n_nodes)):
+            c1, c2 = st.columns(2)
+            fx = c1.number_input(f"Node {i+1} Fx (kN)", value=0.0, key=f"tl_{i}_fx")
+            fy = c2.number_input(f"Node {i+1} Fy (kN)", value=0.0, key=f"tl_{i}_fy")
+            if fx != 0 or fy != 0:
+                loads[i+1] = (fx, fy)
+
+        supports = {}
+        st.markdown("**Supports** – check fixed directions")
+        for i in range(int(n_nodes)):
+            c1, c2 = st.columns(2)
+            sx = c1.checkbox(f"Node {i+1} X fixed", value=False, key=f"ts_{i}_sx")
+            sy = c2.checkbox(f"Node {i+1} Y fixed", value=False, key=f"ts_{i}_sy")
+            if sx or sy:
+                supports[i+1] = (sx, sy)
+
+        if st.button("Solve Truss", key="truss_solve"):
+            if not supports:
+                st.error("Add at least one support.")
+            else:
+                result = truss_analysis(nodes, elements, loads, supports)
+                if "error" in result:
+                    st.error(result["error"])
+                else:
+                    st.success("✅ Analysis complete")
+                    col_r1, col_r2 = st.columns(2)
+                    with col_r1:
+                        st.markdown("**Displacements (mm)**")
+                        disp_data = {"Node": [], "ux": [], "uy": []}
+                        for nid, (ux, uy) in result["displacements"].items():
+                            disp_data["Node"].append(nid)
+                            disp_data["ux"].append(f"{ux:.3f}")
+                            disp_data["uy"].append(f"{uy:.3f}")
+                        st.table(disp_data)
+                    with col_r2:
+                        st.markdown("**Element Forces (kN)**")
+                        force_data = {"Element": [], "Force": []}
+                        for idx, f in enumerate(result["forces"], start=1):
+                            force_data["Element"].append(idx)
+                            force_data["Force"].append(f"{f:.3f}")
+                        st.table(force_data)
+                    st.markdown("**Reactions (kN)**")
+                    react_data = {"Node": [], "Rx": [], "Ry": []}
+                    for nid, (rx, ry) in result["reactions"].items():
+                        react_data["Node"].append(nid)
+                        react_data["Rx"].append(f"{rx:.3f}")
+                        react_data["Ry"].append(f"{ry:.3f}")
+                    st.table(react_data)
+
+    # ---- STEEL CONNECTIONS ----
+    with tabs[9]:
+        st.subheader("Steel Connection Design (Simplified)")
+        conn_type = st.selectbox("Connection type", ["bolted", "welded"], key="conn_type")
+        load = ui_number_input(f"Applied force ({unit_label('force')})", 1.0, 1000.0, 100.0, 1.0, "conn_load", "force")
+        if conn_type == "bolted":
+            bolt_dia = ui_number_input("Bolt diameter (mm)", 12, 30, 20, 1, "conn_bolt_dia", "length_mm")
+            bolt_grade = st.selectbox("Bolt grade", ["4.6", "8.8", "10.9"], key="conn_bolt_grade")
+            num_bolts = st.number_input("Number of bolts", 1, 20, 4, key="conn_num_bolts")
+            plate_thickness = ui_number_input("Plate thickness (mm)", 5, 40, 10, 1, "conn_plate_t", "length_mm")
+            if st.button("Check Connection", key="conn_check"):
+                res = steel_connection_check("bolted", bolt_dia, bolt_grade, num_bolts, plate_thickness, 0, load)
+                if res["status"] == "OK":
+                    st.success(f"✅ Connection OK – Utilization: {res['utilization']:.2f}")
+                else:
+                    st.error(f"❌ Connection FAILS – Utilization: {res['utilization']:.2f}")
+                st.write(f"Design capacity: {res['design_capacity']:.2f} kN")
+                st.write(f"Shear per bolt: {res['shear_capacity_per_bolt']:.2f} kN, Bearing per bolt: {res['bearing_capacity_per_bolt']:.2f} kN")
+        else:
+            weld_size = ui_number_input("Weld leg size (mm)", 3, 15, 6, 1, "conn_weld", "length_mm")
+            if st.button("Check Connection", key="conn_check_weld"):
+                res = steel_connection_check("welded", 0, "8.8", 0, 0, weld_size, load)
+                if res["status"] == "OK":
+                    st.success(f"✅ Connection OK – Utilization: {res['utilization']:.2f}")
+                else:
+                    st.error(f"❌ Connection FAILS – Utilization: {res['utilization']:.2f}")
+                st.write(f"Total capacity: {res['total_capacity']:.2f} kN")
+
+    # ---- LOAD COMBINATIONS ----
+    with tabs[10]:
+        st.subheader("Load Combinations")
+        code = st.selectbox("Design code", ["eurocode", "asce"], key="lc_code")
+        st.markdown("Enter characteristic load effects (e.g., bending moment or axial force).")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        dead = c1.number_input("Dead (G)", value=0.0, key="lc_dead")
+        live = c2.number_input("Live (Q)", value=0.0, key="lc_live")
+        wind = c3.number_input("Wind (W)", value=0.0, key="lc_wind")
+        snow = c4.number_input("Snow (S)", value=0.0, key="lc_snow")
+        seismic = c5.number_input("Seismic (E)", value=0.0, key="lc_seis")
+        if st.button("Generate Combinations", key="lc_generate"):
+            combos = load_combinations({"dead":dead,"live":live,"wind":wind,"snow":snow,"seismic":seismic}, code)
+            st.markdown("**Combinations**")
+            table = {"Combination": [], "Value": []}
+            for name, val in combos:
+                table["Combination"].append(name)
+                table["Value"].append(f"{val:.2f}")
+            st.table(table)
+            max_val = max(combos, key=lambda x: x[1])
+            st.success(f"Governing combination: {max_val[0]} = {max_val[1]:.2f}")
+
+    # ---- SEISMIC ----
+    with tabs[11]:
+        st.subheader("Seismic Base Shear (Simplified ASCE 7-10)")
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        Ss = col_s1.number_input("Ss (g)", min_value=0.0, value=1.0, key="seis_Ss")
+        S1 = col_s2.number_input("S1 (g)", min_value=0.0, value=0.4, key="seis_S1")
+        site_class = col_s3.selectbox("Site Class", ["A","B","C","D","E"], key="seis_site")
+        R = col_s4.number_input("R factor", min_value=1.0, value=5.0, key="seis_R")
+        col_s5, col_s6 = st.columns(2)
+        Ie = col_s5.number_input("Importance Factor Ie", min_value=1.0, value=1.0, key="seis_Ie")
+        T = col_s6.number_input("Period T (sec)", min_value=0.1, value=0.5, key="seis_T")
+        if st.button("Calculate Base Shear", key="seis_calc"):
+            res = seismic_base_shear(Ss, S1, site_class, R, Ie, T)
+            st.metric("Seismic response coefficient Cs", f"{res['Cs']:.4f}")
+            st.write(f"Sds = {res['Sds']:.3f} g, Sd1 = {res['Sd1']:.3f} g")
+            st.write(res["note"])
 
     # ---- EXPORT / REPORT ----
-    with tabs[9]:
+    with tabs[12]:
         st.subheader("Export Analysis Report (PDF)")
         if st.button("📄 Generate Report", key="pdf_gen"):
             report_data = {"Project": "DRUM Sample", "Analysis": "Summary of last checks"}
@@ -865,6 +1029,7 @@ elif page == "Structural Analysis":
                     st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
                 st.success("Report generated!")
 
+    # ---- Building Integration ----
     st.markdown("---")
     if st.session_state.active_building:
         st.subheader("📐 Building Plan Analysis")
