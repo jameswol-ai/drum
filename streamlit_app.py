@@ -78,9 +78,16 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
 .stButton>button {
     background: linear-gradient(135deg, #3B82F6, #2563EB);
     color: white; border: none; border-radius: 8px;
-    padding: 0.5rem 1.5rem; font-weight: 600; transition: 0.2s;
+    padding: 0.5rem 1.5rem; font-weight: 600; transition: all 0.2s ease;
 }
-.stButton>button:hover { transform: scale(1.02); }
+.stButton>button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+.stButton>button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+}
 .metric-card {
     background: #1E293B; border-radius: 12px; padding: 1rem;
     border: 1px solid #334155;
@@ -225,7 +232,6 @@ def generate_random_plan(building, num_rooms=4):
     for i in range(num_rooms):
         parent = random.choice(plan)
         dir = random.choice(directions)
-        # Fixed: dimensions now fit within plan (max 800x500)
         new_w = random.randint(200, 500)
         new_h = random.randint(200, 500)
         if dir == "top":
@@ -257,7 +263,7 @@ def generate_random_plan(building, num_rooms=4):
     building.plan = plan
 
 # ======================
-# LOGIN PAGE
+# LOGIN PAGE (emoji kept)
 # ======================
 if not st.session_state.logged_in:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -311,7 +317,7 @@ if not st.session_state.logged_in:
     st.stop()
 
 # ======================
-# MAIN APP
+# MAIN APP (no emojis)
 # ======================
 username = st.session_state.username
 user_data = st.session_state.user_data
@@ -338,7 +344,7 @@ with st.sidebar:
         </div>
     </div>
     """, unsafe_allow_html=True)
-    st.markdown(f"### 👷 {username}")
+    st.markdown(f"### {username}")
     st.caption(f"Role: {user_data.get('role', 'viewer')}")
     st.markdown("---")
     page = st.radio("Navigate",
@@ -349,7 +355,7 @@ with st.sidebar:
     unit_choice = st.radio("Unit System", ["metric", "imperial"], index=0, key="unit_radio")
     st.session_state.unit_system = unit_choice
 
-    with st.expander("🔧 Analysis Defaults"):
+    with st.expander("Analysis Defaults"):
         st.session_state.eng_params["live_load"] = st.number_input(
             f"Live Load ({unit_label('pressure')})", 1.0, 10.0, st.session_state.eng_params["live_load"], 0.5, key="live_load")
         st.session_state.eng_params["slab_thickness"] = st.number_input(
@@ -360,7 +366,7 @@ with st.sidebar:
         st.session_state.eng_params["orientation"] = st.selectbox("Orientation", ["north","south","east","west"], key="orient")
 
     if is_admin(user_data):
-        with st.expander("👥 User Management"):
+        with st.expander("User Management"):
             users_list = list_users()
             st.write("**Existing users**")
             for u in users_list:
@@ -384,17 +390,17 @@ with st.sidebar:
                     except ValueError as e:
                         st.error(str(e))
 
-    if st.button("🚪 Logout"):
+    if st.button("Logout"):
         save_memory(username, mem)
         for key in list(st.session_state.keys()):
             del st.session_state[key]
         st.rerun()
 
 # ======================
-# PAGE: PROJECT DASHBOARD
+# PAGE: PROJECT DASHBOARD (no emojis)
 # ======================
 if page == "Project Dashboard":
-    st.title("🏢 Project Dashboard")
+    st.title("Project Dashboard")
 
     if st.session_state.active_building:
         building = st.session_state.active_building
@@ -414,20 +420,20 @@ if page == "Project Dashboard":
         col_m4.metric("Est. Cost", f"${cost['total']:,.0f}")
 
         if integrity['pass']:
-            st.success(f"✅ Structural check passed – suggested beam: {integrity['suggested_beam']}")
+            st.success(f"Structural check passed – suggested beam: {integrity['suggested_beam']}")
         else:
-            st.error(f"❌ Span too large ({integrity['max_span_m']} m) – consider intermediate columns")
+            st.error(f"Span too large ({integrity['max_span_m']} m) – consider intermediate columns")
     else:
-        st.info("👈 Create or select a project to see live metrics.")
+        st.info("Create or select a project to see live metrics.")
 
     st.markdown("---")
 
     left_col, right_col = st.columns([1, 3])
 
     with left_col:
-        st.markdown("### 🧰 Project Tools")
+        st.markdown("### Project Tools")
         if is_engineer(user_data):
-            if st.button("➕ New Project", use_container_width=True):
+            if st.button("New Project", use_container_width=True):
                 new_building = Building(name=f"Project-{len(mem['buildings'])+1}", score=50)
                 generate_plan(new_building)
                 mem["buildings"].append(new_building.to_dict())
@@ -435,7 +441,7 @@ if page == "Project Dashboard":
                 log_event(username, mem, f"Created new project: {new_building.name}")
                 save_memory(username, mem)
                 st.rerun()
-            if st.button("🎲 Generate Random Plan", use_container_width=True):
+            if st.button("Generate Random Plan", use_container_width=True):
                 new_building = Building(name=f"Random-{len(mem['buildings'])+1}", score=60)
                 generate_random_plan(new_building, num_rooms=random.randint(4, 8))
                 mem["buildings"].append(new_building.to_dict())
@@ -452,12 +458,12 @@ if page == "Project Dashboard":
                 b = Building.from_dict(bdict)
                 col_a, col_b = st.columns([3,1])
                 with col_a:
-                    if st.button(f"📂 {b.name}", key=f"sel_{b.id}"):
+                    if st.button(f"{b.name}", key=f"sel_{b.id}"):
                         st.session_state.active_building = b
                         st.rerun()
                 if is_engineer(user_data):
                     with col_b:
-                        if st.button("🗑️", key=f"del_{b.id}"):
+                        if st.button("Delete", key=f"del_{b.id}"):
                             mem["buildings"] = [x for x in mem["buildings"] if x["id"] != b.id]
                             if st.session_state.active_building and st.session_state.active_building.id == b.id:
                                 st.session_state.active_building = None
@@ -465,7 +471,7 @@ if page == "Project Dashboard":
                             st.rerun()
 
         st.markdown("---")
-        st.markdown("### 📊 Compare Projects")
+        st.markdown("### Compare Projects")
         if len(mem["buildings"]) >= 2:
             compare_a = st.selectbox("Project A", [b["name"] for b in mem["buildings"]], key="comp_a")
             compare_b = st.selectbox("Project B", [b["name"] for b in mem["buildings"]], key="comp_b")
@@ -486,7 +492,7 @@ if page == "Project Dashboard":
 
         if st.session_state.active_building:
             st.markdown("---")
-            st.markdown("### 📏 Room Areas")
+            st.markdown("### Room Areas")
             plan = st.session_state.active_building.plan
             if plan:
                 total = 0
@@ -504,7 +510,7 @@ if page == "Project Dashboard":
             building = st.session_state.active_building
             plan = building.plan
 
-            with st.expander("🧭 Grid & Orientation", expanded=False):
+            with st.expander("Grid & Orientation", expanded=False):
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     show_grid = st.checkbox("Show Grid", value=st.session_state.show_grid, key="show_grid_cb")
@@ -530,7 +536,7 @@ if page == "Project Dashboard":
                     show_dim = st.checkbox("Show Dimensions", value=st.session_state.show_dimensions, key="show_dim_cb")
                     st.session_state.show_dimensions = show_dim
 
-            st.markdown("#### 📐 2D Floor Plan")
+            st.markdown("#### 2D Floor Plan")
             if plan:
                 svg_str = generate_svg_string(
                     plan,
@@ -545,11 +551,10 @@ if page == "Project Dashboard":
                 st.info("No plan data.")
 
             if is_engineer(user_data):
-                with st.expander("✏️ Edit Plan (Add / Remove / Modify Rooms)", expanded=False):
+                with st.expander("Edit Plan (Add / Remove / Modify Rooms)", expanded=False):
                     col_edit1, col_edit2 = st.columns(2)
                     with col_edit1:
-                        if st.button("➕ Add Random Room"):
-                            # Fixed: width and height within 800x500
+                        if st.button("Add Random Room"):
                             w = random.randint(100, 800)
                             h = random.randint(100, 500)
                             x = random.randint(0, 800 - w)
@@ -567,7 +572,7 @@ if page == "Project Dashboard":
                         if len(plan) > 1:
                             room_names = [r["name"] for r in plan]
                             room_to_remove = st.selectbox("Remove room", room_names, key="remove_room")
-                            if st.button("🗑️ Remove Selected"):
+                            if st.button("Remove Selected"):
                                 plan = [r for r in plan if r["name"] != room_to_remove]
                                 building.plan = plan
                                 update_building_plan(building, mem, username)
@@ -598,35 +603,35 @@ if page == "Project Dashboard":
 
                     if plan:
                         st.markdown("---")
-                        st.markdown("**↕️ Nudge selected room**")
+                        st.markdown("**Nudge selected room**")
                         room_names = [r["name"] for r in plan]
                         nudge_room = st.selectbox("Select room", room_names, key="nudge_room_sel")
                         nudge_step = st.number_input("Step (mm)", value=100, step=10, key="nudge_step")
                         col_n1, col_n2, col_n3, col_n4 = st.columns(4)
                         idx = next(i for i, r in enumerate(plan) if r["name"] == nudge_room)
                         room = plan[idx]
-                        if col_n1.button("⬅️ Left", key="nudge_left"):
+                        if col_n1.button("Left", key="nudge_left"):
                             plan[idx]["x"] = max(0, room["x"] - nudge_step)
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
-                        if col_n2.button("➡️ Right", key="nudge_right"):
+                        if col_n2.button("Right", key="nudge_right"):
                             plan[idx]["x"] = min(room["x"] + nudge_step, 800 - room["w"])
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
-                        if col_n3.button("⬆️ Up", key="nudge_up"):
+                        if col_n3.button("Up", key="nudge_up"):
                             plan[idx]["y"] = max(0, room["y"] - nudge_step)
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
-                        if col_n4.button("⬇️ Down", key="nudge_down"):
+                        if col_n4.button("Down", key="nudge_down"):
                             plan[idx]["y"] = min(room["y"] + nudge_step, 500 - room["h"])
                             building.plan = plan
                             update_building_plan(building, mem, username)
                             st.rerun()
 
-            st.markdown("#### 🧊 Interactive 3D Model")
+            st.markdown("#### Interactive 3D Model")
             if plan:
                 rooms_js = ""
                 for room in plan:
@@ -683,7 +688,7 @@ if page == "Project Dashboard":
                 st.info("3D view requires a building plan.")
 
             st.markdown("---")
-            with st.expander("💰 Cost & Material Estimate", expanded=False):
+            with st.expander("Cost & Material Estimate", expanded=False):
                 if st.button("Calculate Estimate", key="calc_cost"):
                     cost = estimate_cost(plan)
                     st.table({
@@ -694,11 +699,11 @@ if page == "Project Dashboard":
                     })
 
             st.markdown("---")
-            with st.expander("📤 Export & Share", expanded=False):
-                if st.button("📄 Download Plan as SVG"):
+            with st.expander("Export & Share", expanded=False):
+                if st.button("Download Plan as SVG"):
                     svg_content = generate_svg_string(plan, show_grid=False, show_north=False, show_dimensions=False)
                     st.download_button("Download SVG", svg_content, file_name=f"{building.name}_plan.svg", mime="image/svg+xml")
-                if st.button("📊 Export Summary PDF"):
+                if st.button("Export Summary PDF"):
                     project_data = {
                         "Project Name": building.name,
                         "Engineer": username,
@@ -728,23 +733,24 @@ if page == "Project Dashboard":
                         with open(filename, "rb") as f:
                             st.download_button("Download PDF Report", f, file_name=filename, mime="application/pdf")
                         st.success("Report generated!")
+                st.text_input("Shareable link (copy)", value=f"https://drum-studio.com/project/{building.id}", disabled=True)
 
         else:
-            st.info("👈 Select a project from the list or create a new one to start.")
+            st.info("Select a project from the list or create a new one to start.")
 
     st.markdown("---")
-    st.subheader("🕓 Recent Activity")
+    st.subheader("Recent Activity")
     if mem["logs"]:
         for log in reversed(mem["logs"][-5:]):
-            st.caption(f"`{log['time'][11:19]}` – {log['msg']}")
+            st.caption(f"{log['time'][11:19]} – {log['msg']}")
     else:
         st.caption("No activity yet.")
 
 # ======================
-# PAGE: STRUCTURAL ANALYSIS
+# PAGE: STRUCTURAL ANALYSIS (no emojis)
 # ======================
 elif page == "Structural Analysis":
-    st.title("🏗️ Structural Analysis Workstation")
+    st.title("Structural Analysis Workstation")
     st.caption("All inputs and outputs respect the selected unit system.")
 
     def ui_number_input(label, min_val, max_val, value, step, key, unit_type):
@@ -757,10 +763,10 @@ elif page == "Structural Analysis":
         return input_metric(user_val, unit_type)
 
     tabs = st.tabs([
-        "📐 Beams", "🧱 Columns", "🔲 Slabs", "🌍 Foundations",
-        "🏛️ Walls & Finishes", "📌 Piles", "⚡ Prestressed",
-        "🧱 Retaining Wall", "🔺 Truss", "🔩 Connections",
-        "🌪️ Load Combos", "🌍 Seismic", "📄 Export/Report"
+        "Beams", "Columns", "Slabs", "Foundations",
+        "Walls & Finishes", "Piles", "Prestressed",
+        "Retaining Wall", "Truss", "Connections",
+        "Load Combos", "Seismic", "Export/Report"
     ])
 
     # ---- BEAMS ----
@@ -778,11 +784,10 @@ elif page == "Structural Analysis":
             if st.button("Check RC Beam", key="check_rc_beam"):
                 fck = CONCRETE_GRADES[grade]["fck"]
                 res = check_rc_beam(b, h, d, fck, M_ed, V_ed, span)
-                if res["pass"]: st.success("✅ Beam OK")
-                else: st.error("❌ Beam fails check")
+                if res["pass"]: st.success("Beam OK")
+                else: st.error("Beam fails check")
                 st.write(f"As required: {output_metric(res['As_req'], 'area'):.2f} {unit_label('area')}")
                 st.json(res)
-            # Diagrams
             st.markdown("---")
             st.subheader("Beam Diagrams")
             col_diag1, col_diag2, col_diag3 = st.columns(3)
@@ -810,12 +815,11 @@ elif page == "Structural Analysis":
             if st.button("Check Steel Beam", key="check_steel_beam"):
                 steel = STEEL_GRADES[grade]
                 res = check_steel_beam(section, M_ed, V_ed, span, steel)
-                if res["pass"]: st.success("✅ Beam OK")
-                else: st.error("❌ Beam fails")
+                if res["pass"]: st.success("Beam OK")
+                else: st.error("Beam fails")
                 st.write(f"Utilization: {res['utilization']:.2f}")
                 st.write(f"Deflection: {output_metric(res['deflection_mm']/1000, 'length'):.3f} {unit_label('length')}")
                 st.json(res)
-            # Diagrams
             st.markdown("---")
             st.subheader("Beam Diagrams")
             col_diag1, col_diag2, col_diag3 = st.columns(3)
@@ -848,8 +852,8 @@ elif page == "Structural Analysis":
             if st.button("Check Column", key="check_col"):
                 fck = CONCRETE_GRADES[grade]["fck"]
                 res = check_rc_column(N_ed, M_ed, b, h, fck, l0)
-                if res["pass"]: st.success("✅ Column OK")
-                else: st.error("❌ Column fails")
+                if res["pass"]: st.success("Column OK")
+                else: st.error("Column fails")
                 st.write(f"N_Rd: {output_metric(res['N_rd'], 'force'):.1f} {unit_label('force')}")
                 st.json(res)
 
@@ -877,7 +881,7 @@ elif page == "Structural Analysis":
         wall = st.selectbox("Wall Type", list(WALL_TYPES.keys()), key="wall_type")
         props = WALL_TYPES[wall]
         weight_disp = output_metric(props['weight'], 'pressure') if st.session_state.unit_system=="imperial" else props['weight']
-        st.write(f"Weight: {weight_disp:.2f} {unit_label('pressure')}, U‑value: {props['U']} W/m²K, Sound: {props['sound']} dB")
+        st.write(f"Weight: {weight_disp:.2f} {unit_label('pressure')}, U-value: {props['U']} W/m²K, Sound: {props['sound']} dB")
         finishes = st.multiselect("Finishes", list(FINISHES.keys()), default=["Plaster (internal)", "Paint"], key="finishes")
         finish_load = sum(FINISHES[f] for f in finishes)
         finish_disp = output_metric(finish_load, 'pressure') if st.session_state.unit_system=="imperial" else finish_load
@@ -913,8 +917,8 @@ elif page == "Structural Analysis":
         fck = st.number_input("fck (MPa)", 20, 60, 35, key="pre_fck")
         if st.button("Check Stresses", key="pre_check"):
             res = check_prestressed_beam(M_ext, P, e, A, I, y_top, y_bot, fck)
-            if res["pass"]: st.success("✅ Stresses within limits")
-            else: st.error("❌ Stress limit exceeded")
+            if res["pass"]: st.success("Stresses within limits")
+            else: st.error("Stress limit exceeded")
             st.write(f"Top stress: {output_metric(res['sigma_top_MPa'], 'stress'):.2f} {unit_label('stress')}")
             st.write(f"Bottom stress: {output_metric(res['sigma_bot_MPa'], 'stress'):.2f} {unit_label('stress')}")
             st.write(f"Allowable compression: {output_metric(res['sigma_c_allow'], 'stress'):.2f} {unit_label('stress')}")
@@ -931,8 +935,8 @@ elif page == "Structural Analysis":
         wall_friction = st.number_input("Base friction coefficient", 0.3, 0.8, 0.6, key="rw_fric")
         if st.button("Check Stability", key="rw_check"):
             res = retaining_wall_stability(H, gamma, phi, c, surcharge, wall_friction)
-            if res["pass"]: st.success("✅ Wall stable")
-            else: st.error("❌ Stability check failed")
+            if res["pass"]: st.success("Wall stable")
+            else: st.error("Stability check failed")
             st.write(f"Active thrust: {output_metric(res['Pa_kN'], 'force'):.2f} {unit_label('force')}/m")
             st.write(f"Overturning SF: {res['F_overt']:.2f}, Sliding SF: {res['F_sliding']:.2f}")
 
@@ -990,7 +994,7 @@ elif page == "Structural Analysis":
                 if "error" in result:
                     st.error(result["error"])
                 else:
-                    st.success("✅ Analysis complete")
+                    st.success("Analysis complete")
                     col_r1, col_r2 = st.columns(2)
                     with col_r1:
                         st.markdown("**Displacements (mm)**")
@@ -1032,9 +1036,9 @@ elif page == "Structural Analysis":
             if st.button("Check Connection", key="conn_check"):
                 res = steel_connection_check("bolted", bolt_dia, bolt_grade, num_bolts, plate_thickness, 0, load)
                 if res["status"] == "OK":
-                    st.success(f"✅ Connection OK – Utilization: {res['utilization']:.2f}")
+                    st.success(f"Connection OK – Utilization: {res['utilization']:.2f}")
                 else:
-                    st.error(f"❌ Connection FAILS – Utilization: {res['utilization']:.2f}")
+                    st.error(f"Connection FAILS – Utilization: {res['utilization']:.2f}")
                 st.write(f"Design capacity: {res['design_capacity']:.2f} kN")
                 st.write(f"Shear per bolt: {res['shear_capacity_per_bolt']:.2f} kN, Bearing per bolt: {res['bearing_capacity_per_bolt']:.2f} kN")
         else:
@@ -1042,9 +1046,9 @@ elif page == "Structural Analysis":
             if st.button("Check Connection", key="conn_check_weld"):
                 res = steel_connection_check("welded", 0, "8.8", 0, 0, weld_size, load)
                 if res["status"] == "OK":
-                    st.success(f"✅ Connection OK – Utilization: {res['utilization']:.2f}")
+                    st.success(f"Connection OK – Utilization: {res['utilization']:.2f}")
                 else:
-                    st.error(f"❌ Connection FAILS – Utilization: {res['utilization']:.2f}")
+                    st.error(f"Connection FAILS – Utilization: {res['utilization']:.2f}")
                 st.write(f"Total capacity: {res['total_capacity']:.2f} kN")
 
     # ---- LOAD COMBINATIONS ----
@@ -1089,7 +1093,7 @@ elif page == "Structural Analysis":
     # ---- EXPORT / REPORT ----
     with tabs[12]:
         st.subheader("Export Analysis Report (PDF)")
-        if st.button("📄 Generate Report", key="pdf_gen"):
+        if st.button("Generate Report", key="pdf_gen"):
             if st.session_state.active_building:
                 building = st.session_state.active_building
                 plan = building.plan
@@ -1134,7 +1138,7 @@ elif page == "Structural Analysis":
     # ---- Building Integration ----
     st.markdown("---")
     if st.session_state.active_building:
-        st.subheader("📐 Building Plan Analysis")
+        st.subheader("Building Plan Analysis")
         plan = st.session_state.active_building.plan
         area = calculate_total_area(plan)
         load = compute_floor_loads(plan,
@@ -1148,10 +1152,10 @@ elif page == "Structural Analysis":
         st.info("No active building. Open a project from the dashboard or create a new one.")
 
 # ======================
-# PAGE: ARCHIVES
+# PAGE: ARCHIVES (no emojis)
 # ======================
 else:
-    st.title("🗄️ Project Archives")
+    st.title("Project Archives")
     if mem["buildings"]:
         for bdict in reversed(mem["buildings"]):
             building = Building.from_dict(bdict)
