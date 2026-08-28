@@ -13,7 +13,7 @@ USERS_FILE = os.path.join(DATA_DIR, "users.json")
 MEMORY_DIR = os.path.join(DATA_DIR, "memory")
 
 DEFAULT_STATE = {
-    "buildings": [],
+    "projects": [],
     "logs": [],
     "settings": {
         "theme": "dark",
@@ -133,95 +133,179 @@ def log_event(username, memory, message):
     memory["logs"] = memory["logs"][-100:]
     save_memory(username, memory)
 
-class Building:
-    def __init__(self, name="Untitled", score=0, plan=None, id=None, building_type="residential", storeys=1):
+# ---------- Project Management ----------
+class Project:
+    def __init__(self, name="Untitled Project", description="", project_type="building", id=None):
         self.id = id or str(uuid.uuid4())
         self.name = name
-        self.score = score
-        self.plan = plan or []
+        self.description = description
+        self.project_type = project_type
         self.created_at = datetime.now().isoformat()
-        self.building_type = building_type
-        self.storeys = storeys
-        self.floors = []  # For multi-storey
+        self.updated_at = datetime.now().isoformat()
+        self.members = []  # List of structural members
 
     def to_dict(self):
         return {
             "id": self.id,
             "name": self.name,
-            "score": self.score,
-            "plan": self.plan,
+            "description": self.description,
+            "project_type": self.project_type,
             "created_at": self.created_at,
-            "building_type": self.building_type,
-            "storeys": self.storeys,
-            "floors": self.floors,
+            "updated_at": self.updated_at,
+            "members": self.members,
         }
 
     @classmethod
     def from_dict(cls, data):
-        b = cls(name=data.get("name", "Untitled"),
-                score=data.get("score", 0),
-                plan=data.get("plan", []),
-                id=data.get("id"),
-                building_type=data.get("building_type", "residential"),
-                storeys=data.get("storeys", 1))
-        b.created_at = data.get("created_at", b.created_at)
-        b.floors = data.get("floors", [])
-        return b
+        p = cls(
+            name=data.get("name", "Untitled Project"),
+            description=data.get("description", ""),
+            project_type=data.get("project_type", "building"),
+            id=data.get("id")
+        )
+        p.created_at = data.get("created_at", p.created_at)
+        p.updated_at = data.get("updated_at", p.updated_at)
+        p.members = data.get("members", [])
+        return p
 
-def generate_plan(building, num_rooms=5):
-    import random
-    colors = ["#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6"]
-    plan = []
-    for i in range(num_rooms):
-        w = random.randint(100, 800)
-        h = random.randint(100, 500)
-        x = random.randint(0, 800 - w)
-        y = random.randint(0, 500 - h)
-        plan.append({
-            "x": x, "y": y, "w": w, "h": h,
-            "name": f"Room {i+1}",
-            "color": random.choice(colors)
-        })
-    building.plan = plan
+def create_project(username, name, description="", project_type="building"):
+    mem = load_memory(username)
+    project = Project(name=name, description=description, project_type=project_type)
+    mem["projects"].append(project.to_dict())
+    save_memory(username, mem)
+    return project
 
-def init_quests():
-    return {
-        "create_project": {"progress": 0, "target": 1, "completed": False},
-        "run_analysis": {"progress": 0, "target": 1, "completed": False},
+def get_projects(username):
+    mem = load_memory(username)
+    return [Project.from_dict(p) for p in mem.get("projects", [])]
+
+def get_project(username, project_id):
+    projects = get_projects(username)
+    for p in projects:
+        if p.id == project_id:
+            return p
+    return None
+
+def update_project(username, project_id, name=None, description=None, project_type=None):
+    mem = load_memory(username)
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            if name is not None:
+                p["name"] = name
+            if description is not None:
+                p["description"] = description
+            if project_type is not None:
+                p["project_type"] = project_type
+            p["updated_at"] = datetime.now().isoformat()
+            break
+    save_memory(username, mem)
+
+def delete_project(username, project_id):
+    mem = load_memory(username)
+    mem["projects"] = [p for p in mem.get("projects", []) if p["id"] != project_id]
+    save_memory(username, mem)
+
+# ---------- Member Management ----------
+def add_member(username, project_id, member_type, name, properties):
+    mem = load_memory(username)
+    member = {
+        "id": str(uuid.uuid4()),
+        "type": member_type,
+        "name": name,
+        "properties": properties,
+        "analyses": [],
+        "created_at": datetime.now().isoformat(),
     }
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            p["members"].append(member)
+            break
+    save_memory(username, mem)
+    return member
 
-def update_quests(username, quest_id, progress_increment=1):
-    user = get_user(username)
-    if not user:
-        return
-    quests = user.get("quests", init_quests())
-    if quest_id in quests:
-        q = quests[quest_id]
-        if not q["completed"]:
-            q["progress"] = min(q["target"], q["progress"] + progress_increment)
-            if q["progress"] >= q["target"]:
-                q["completed"] = True
-        user["quests"] = quests
-        update_user_data(username, user)
+def get_members(username, project_id):
+    project = get_project(username, project_id)
+    if project:
+        return project.members
+    return []
 
-def grant_quest_rewards(username, quest_id):
-    user = get_user(username)
-    if not user:
-        return
-    quests = user.get("quests", {})
-    q = quests.get(quest_id)
-    if q and q["completed"] and not q.get("rewarded", False):
-        add_xp(username, 50)
-        q["rewarded"] = True
-        user["quests"] = quests
-        update_user_data(username, user)
+def update_member(username, project_id, member_id, name=None, properties=None):
+    mem = load_memory(username)
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            for m in p["members"]:
+                if m["id"] == member_id:
+                    if name is not None:
+                        m["name"] = name
+                    if properties is not None:
+                        m["properties"] = properties
+                    break
+    save_memory(username, mem)
 
-def simulate_evolution(building):
-    building.score += 1
-    return building
+def delete_member(username, project_id, member_id):
+    mem = load_memory(username)
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            p["members"] = [m for m in p["members"] if m["id"] != member_id]
+            break
+    save_memory(username, mem)
 
-def generate_rhythm():
-    return "♩♪♫"
+def add_member_analysis(username, project_id, member_id, analysis_type, data):
+    mem = load_memory(username)
+    analysis_entry = {
+        "id": str(uuid.uuid4()),
+        "type": analysis_type,
+        "data": data,
+        "created_at": datetime.now().isoformat(),
+    }
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            for m in p["members"]:
+                if m["id"] == member_id:
+                    m["analyses"].append(analysis_entry)
+                    break
+    save_memory(username, mem)
+    return analysis_entry
+
+def delete_member_analysis(username, project_id, member_id, analysis_id):
+    mem = load_memory(username)
+    for p in mem.get("projects", []):
+        if p["id"] == project_id:
+            for m in p["members"]:
+                if m["id"] == member_id:
+                    m["analyses"] = [a for a in m["analyses"] if a["id"] != analysis_id]
+                    break
+    save_memory(username, mem)
+
+# ---------- Analysis Storage (Legacy) ----------
+def save_analysis(username, analysis_type, data, project_id=None):
+    mem = load_memory(username)
+    if "analyses" not in mem:
+        mem["analyses"] = []
+    analysis_entry = {
+        "id": str(uuid.uuid4()),
+        "type": analysis_type,
+        "data": data,
+        "created_at": datetime.now().isoformat(),
+        "project_id": project_id,
+    }
+    mem["analyses"].append(analysis_entry)
+    save_memory(username, mem)
+    return analysis_entry["id"]
+
+def get_analyses(username, analysis_type=None, project_id=None):
+    mem = load_memory(username)
+    analyses = mem.get("analyses", [])
+    if analysis_type:
+        analyses = [a for a in analyses if a["type"] == analysis_type]
+    if project_id:
+        analyses = [a for a in analyses if a.get("project_id") == project_id]
+    return analyses
+
+def delete_analysis(username, analysis_id):
+    mem = load_memory(username)
+    mem["analyses"] = [a for a in mem.get("analyses", []) if a["id"] != analysis_id]
+    save_memory(username, mem)
 
 # ---------- User Management ----------
 def list_users():
@@ -256,67 +340,7 @@ def is_admin(user_data):
 def is_engineer(user_data):
     return user_data and user_data.get("role") in ("admin", "engineer")
 
-# ---------- Analysis Storage ----------
-def save_analysis(username, analysis_type, data, project_id=None):
-    mem = load_memory(username)
-    if "analyses" not in mem:
-        mem["analyses"] = []
-    analysis_entry = {
-        "id": str(uuid.uuid4()),
-        "type": analysis_type,
-        "data": data,
-        "created_at": datetime.now().isoformat(),
-        "project_id": project_id,
-    }
-    mem["analyses"].append(analysis_entry)
-    save_memory(username, mem)
-    return analysis_entry["id"]
-
-def get_analyses(username, analysis_type=None, project_id=None):
-    mem = load_memory(username)
-    analyses = mem.get("analyses", [])
-    if analysis_type:
-        analyses = [a for a in analyses if a["type"] == analysis_type]
-    if project_id:
-        analyses = [a for a in analyses if a.get("project_id") == project_id]
-    return analyses
-
-def delete_analysis(username, analysis_id):
-    mem = load_memory(username)
-    mem["analyses"] = [a for a in mem.get("analyses", []) if a["id"] != analysis_id]
-    save_memory(username, mem)
-
-def update_analysis(username, analysis_id, new_data):
-    mem = load_memory(username)
-    for a in mem.get("analyses", []):
-        if a["id"] == analysis_id:
-            a["data"] = new_data
-            a["updated_at"] = datetime.now().isoformat()
-            break
-    save_memory(username, mem)
-
-# ---------- Project Templates ----------
-def get_project_templates():
-    return {
-        "Residential House": {
-            "rooms": ["Living Room", "Kitchen", "Bedroom 1", "Bedroom 2", "Bathroom"],
-            "storeys": 1,
-        },
-        "Office Building": {
-            "rooms": ["Reception", "Open Office", "Meeting Room", "Server Room", "Restroom"],
-            "storeys": 3,
-        },
-        "Warehouse": {
-            "rooms": ["Storage Area", "Loading Dock", "Office", "Restroom"],
-            "storeys": 1,
-        },
-        "Retail Store": {
-            "rooms": ["Sales Floor", "Storage", "Office", "Restroom"],
-            "storeys": 1,
-        },
-    }
-
-# ---------- Material Costs ----------
+# ---------- Settings ----------
 def get_material_costs(username):
     mem = load_memory(username)
     return mem.get("settings", {}).get("default_material_costs", {
@@ -333,7 +357,6 @@ def update_material_costs(username, costs):
     mem["settings"]["default_material_costs"] = costs
     save_memory(username, mem)
 
-# ---------- Theme ----------
 def get_theme(username):
     mem = load_memory(username)
     return mem.get("settings", {}).get("theme", "dark")
@@ -345,19 +368,34 @@ def update_theme(username, theme):
     mem["settings"]["theme"] = theme
     save_memory(username, mem)
 
-# ---------- Collaboration ----------
-def share_project(username, project_id, shared_with_username):
-    mem = load_memory(username)
-    if "shared_projects" not in mem:
-        mem["shared_projects"] = {}
-    if project_id not in mem["shared_projects"]:
-        mem["shared_projects"][project_id] = []
-    if shared_with_username not in mem["shared_projects"][project_id]:
-        mem["shared_projects"][project_id].append(shared_with_username)
-        save_memory(username, mem)
-        return True
-    return False
+def init_quests():
+    return {
+        "create_project": {"progress": 0, "target": 1, "completed": False},
+        "run_analysis": {"progress": 0, "target": 1, "completed": False},
+    }
 
-def get_shared_projects(username):
-    mem = load_memory(username)
-    return mem.get("shared_projects", {})
+def update_quests(username, quest_id, progress_increment=1):
+    user = get_user(username)
+    if not user:
+        return
+    quests = user.get("quests", init_quests())
+    if quest_id in quests:
+        q = quests[quest_id]
+        if not q["completed"]:
+            q["progress"] = min(q["target"], q["progress"] + progress_increment)
+            if q["progress"] >= q["target"]:
+                q["completed"] = True
+        user["quests"] = quests
+        update_user_data(username, user)
+
+def grant_quest_rewards(username, quest_id):
+    user = get_user(username)
+    if not user:
+        return
+    quests = user.get("quests", {})
+    q = quests.get(quest_id)
+    if q and q["completed"] and not q.get("rewarded", False):
+        add_xp(username, 50)
+        q["rewarded"] = True
+        user["quests"] = quests
+        update_user_data(username, user)
