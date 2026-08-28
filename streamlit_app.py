@@ -16,7 +16,6 @@ from main import (
     list_users, update_user_role, delete_user, is_admin, is_engineer
 )
 
-# Engineering package imports
 from engineering.materials import CONCRETE_GRADES, STEEL_GRADES, TIMBER_CLASSES, WALL_TYPES, FINISHES
 from engineering.beams import check_rc_beam, check_steel_beam, check_timber_beam, check_composite_beam
 from engineering.columns import check_rc_column
@@ -33,7 +32,6 @@ from engineering.cost import calculate_total_area, compute_floor_loads, check_st
 from engineering.pdf_report import generate_pdf_report, generate_analysis_report
 from engineering.visualization import plot_beam_diagrams, plot_truss_deformed
 
-# Eurocodes package imports
 import eurocodes.en1990 as ec0
 import eurocodes.en1991 as ec1
 import eurocodes.en1992 as ec2
@@ -68,8 +66,8 @@ if "logged_in" not in st.session_state:
         "orientation": "south",
     }
     st.session_state.page = "Project Dashboard"
-    st.session_state.show_grid = False
-    st.session_state.grid_spacing_mm = 1000
+    st.session_state.show_grid = True
+    st.session_state.grid_spacing_mm = 500
     st.session_state.show_north = False
     st.session_state.show_dimensions = True
 
@@ -85,17 +83,14 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
-/* Global */
 html, body, .stApp {
     font-family: 'Inter', sans-serif;
     background: #0F172A; color: #E2E8F0;
 }
 h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
 
-/* Sidebar */
 .sidebar .sidebar-content { background: #1E293B; }
 
-/* Buttons */
 .stButton>button {
     background: linear-gradient(135deg, #3B82F6, #2563EB);
     color: white; border: none; border-radius: 8px;
@@ -115,7 +110,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
 }
 
-/* Metric cards */
 .metric-card {
     background: #1E293B; border-radius: 12px; padding: 1rem;
     border: 1px solid #334155;
@@ -126,7 +120,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     box-shadow: 0 12px 24px rgba(0,0,0,0.3);
 }
 
-/* Input fields */
 .stNumberInput>div>div>input,
 .stTextInput>div>div>input {
     background: #1E293B; color: #F8FAFC;
@@ -139,7 +132,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
 }
 
-/* Select boxes */
 .stSelectbox>div>div>select {
     background: #1E293B; color: #F8FAFC;
     transition: border-color 0.3s ease;
@@ -148,7 +140,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     border-color: #3B82F6;
 }
 
-/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px;
 }
@@ -169,7 +160,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     color: #F8FAFC;
 }
 
-/* Expanders */
 .stExpander {
     background: #1E293B;
     border: 1px solid #334155;
@@ -182,14 +172,12 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     box-shadow: 0 4px 12px rgba(59,130,246,0.2);
 }
 
-/* Tables */
 .stTable {
     background: #1E293B;
     border-radius: 8px;
     overflow: hidden;
 }
 
-/* Main content fade-in */
 .main .block-container {
     animation: fadeIn 0.5s ease-out;
 }
@@ -198,7 +186,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Download button */
 .stDownloadButton>button {
     transition: all 0.3s ease;
 }
@@ -207,7 +194,6 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     box-shadow: 0 4px 8px rgba(0,0,0,0.2);
 }
 
-/* Radio and checkbox labels */
 .stRadio label,
 .stCheckbox label {
     transition: color 0.3s ease;
@@ -217,11 +203,40 @@ h1, h2, h3 { color: #F8FAFC; font-weight: 600; }
     color: #F8FAFC;
 }
 
-/* Gradient shift animation */
 @keyframes gradientShift {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
+}
+
+.news-card {
+    background: #1E293B;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: all 0.3s ease;
+}
+.news-card:hover {
+    border-color: #3B82F6;
+    box-shadow: 0 4px 12px rgba(59,130,246,0.2);
+    transform: translateY(-2px);
+}
+.news-title {
+    font-weight: 600;
+    color: #F8FAFC;
+    font-size: 1.1rem;
+    margin-bottom: 8px;
+}
+.news-date {
+    color: #94A3B8;
+    font-size: 0.8rem;
+    margin-bottom: 8px;
+}
+.news-summary {
+    color: #CBD5E1;
+    font-size: 0.9rem;
+    line-height: 1.5;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -315,40 +330,59 @@ def update_building_plan(building, mem, username):
             break
     save_memory(username, mem)
 
-def generate_random_plan(building, num_rooms=4):
+def generate_random_plan(building, num_rooms=4, grid_spacing_mm=500):
     colors = [
         "#3B82F6", "#EF4444", "#10B981", "#F59E0B", "#8B5CF6",
         "#EC4899", "#06B6D4", "#84CC16", "#F97316", "#6366F1"
     ]
     plan = []
+    
     hall_w = random.randint(400, 600)
     hall_h = random.randint(400, 600)
-    hall_x = 400 - hall_w // 2
-    hall_y = 250 - hall_h // 2
+    hall_w = round(hall_w / grid_spacing_mm) * grid_spacing_mm
+    hall_h = round(hall_h / grid_spacing_mm) * grid_spacing_mm
+    hall_x = round((400 - hall_w // 2) / grid_spacing_mm) * grid_spacing_mm
+    hall_y = round((250 - hall_h // 2) / grid_spacing_mm) * grid_spacing_mm
+    
     plan.append({
         "x": hall_x, "y": hall_y, "w": hall_w, "h": hall_h,
         "name": "Hall", "color": "#94A3B8"
     })
+    
     directions = ["top", "bottom", "left", "right"]
     for i in range(num_rooms):
         parent = random.choice(plan)
         dir = random.choice(directions)
+        
         new_w = random.randint(200, 500)
         new_h = random.randint(200, 500)
+        new_w = round(new_w / grid_spacing_mm) * grid_spacing_mm
+        new_h = round(new_h / grid_spacing_mm) * grid_spacing_mm
+        
+        gap = grid_spacing_mm
+        
         if dir == "top":
             new_x = parent["x"] + (parent["w"] - new_w) // 2
-            new_y = parent["y"] - new_h - 10
+            new_y = parent["y"] - new_h - gap
         elif dir == "bottom":
             new_x = parent["x"] + (parent["w"] - new_w) // 2
-            new_y = parent["y"] + parent["h"] + 10
+            new_y = parent["y"] + parent["h"] + gap
         elif dir == "left":
-            new_x = parent["x"] - new_w - 10
+            new_x = parent["x"] - new_w - gap
             new_y = parent["y"] + (parent["h"] - new_h) // 2
         else:
-            new_x = parent["x"] + parent["w"] + 10
+            new_x = parent["x"] + parent["w"] + gap
             new_y = parent["y"] + (parent["h"] - new_h) // 2
+        
+        new_x = round(new_x / grid_spacing_mm) * grid_spacing_mm
+        new_y = round(new_y / grid_spacing_mm) * grid_spacing_mm
+        
         new_x = max(0, min(new_x, 800 - new_w))
         new_y = max(0, min(new_y, 500 - new_h))
+        
+        new_x = round(new_x / grid_spacing_mm) * grid_spacing_mm
+        new_y = round(new_y / grid_spacing_mm) * grid_spacing_mm
+        
         overlap = False
         for r in plan:
             if (new_x < r["x"] + r["w"] and new_x + new_w > r["x"] and
@@ -362,6 +396,45 @@ def generate_random_plan(building, num_rooms=4):
                 "color": random.choice(colors)
             })
     building.plan = plan
+
+# ======================
+# NEWS DATA
+# ======================
+def get_engineering_news():
+    """Return a list of engineering and structural analysis news items."""
+    news = [
+        {
+            "title": "Eurocode Updates: EN 1992-1-1 Amendment Published",
+            "date": "2024-11-15",
+            "summary": "CEN has published an amendment to EN 1992-1-1 covering concrete structures. The update includes revised shear design provisions and new guidance on high-strength concrete."
+        },
+        {
+            "title": "Advances in Structural Health Monitoring",
+            "date": "2024-10-28",
+            "summary": "New sensor technologies are enabling real-time monitoring of bridges and buildings. Fiber optic sensors can now detect strain changes with unprecedented accuracy."
+        },
+        {
+            "title": "Mass Timber Construction Reaches New Heights",
+            "date": "2024-10-05",
+            "summary": "Cross-laminated timber (CLT) buildings are being constructed at record heights. The latest projects demonstrate timber's viability as a sustainable structural material."
+        },
+        {
+            "title": "AI in Structural Analysis: Machine Learning for Design",
+            "date": "2024-09-20",
+            "summary": "Machine learning algorithms are being integrated into structural analysis software, enabling faster optimization of building designs and more accurate failure prediction."
+        },
+        {
+            "title": "Seismic Design Guidelines Updated",
+            "date": "2024-09-01",
+            "summary": "New seismic design guidelines incorporate lessons learned from recent earthquakes. The updates focus on improved ductility requirements and better performance-based design methods."
+        },
+        {
+            "title": "3D Printing in Construction: Structural Applications",
+            "date": "2024-08-15",
+            "summary": "3D-printed concrete structures are moving from experimental to practical applications. Engineers are developing new design approaches for printed structural elements."
+        },
+    ]
+    return news
 
 # ======================
 # LOGIN PAGE
@@ -539,14 +612,18 @@ if page == "Project Dashboard":
                 generate_plan(new_building)
                 mem["buildings"].append(new_building.to_dict())
                 st.session_state.active_building = new_building
+                st.session_state.show_grid = True
+                st.session_state.grid_spacing_mm = 500
                 log_event(username, mem, f"Created new project: {new_building.name}")
                 save_memory(username, mem)
                 st.rerun()
             if st.button("Generate Random Plan", use_container_width=True):
                 new_building = Building(name=f"Random-{len(mem['buildings'])+1}", score=60)
-                generate_random_plan(new_building, num_rooms=random.randint(4, 8))
+                generate_random_plan(new_building, num_rooms=random.randint(4, 8), grid_spacing_mm=500)
                 mem["buildings"].append(new_building.to_dict())
                 st.session_state.active_building = new_building
+                st.session_state.show_grid = True
+                st.session_state.grid_spacing_mm = 500
                 log_event(username, mem, f"Generated random plan: {new_building.name}")
                 save_memory(username, mem)
                 st.rerun()
@@ -606,12 +683,25 @@ if page == "Project Dashboard":
             else:
                 st.caption("No rooms yet.")
 
+        # News Section
+        st.markdown("---")
+        st.markdown("### Engineering News")
+        news_items = get_engineering_news()
+        for news in news_items[:4]:  # Show top 4 news items
+            st.markdown(f"""
+            <div class="news-card">
+                <div class="news-title">{news['title']}</div>
+                <div class="news-date">{news['date']}</div>
+                <div class="news-summary">{news['summary']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
     with right_col:
         if st.session_state.active_building:
             building = st.session_state.active_building
             plan = building.plan
 
-            with st.expander("Grid & Orientation", expanded=False):
+            with st.expander("Grid & Orientation", expanded=True):
                 col_g1, col_g2 = st.columns(2)
                 with col_g1:
                     show_grid = st.checkbox("Show Grid", value=st.session_state.show_grid, key="show_grid_cb")
@@ -625,7 +715,7 @@ if page == "Project Dashboard":
                             disp_spacing = st.session_state.grid_spacing_mm / 304.8
                             label = "Grid spacing (ft)"
                             step = 1.0
-                        new_sp = st.number_input(label, min_value=0.1, max_value=10.0,
+                        new_sp = st.number_input(label, min_value=0.1, max_value=5.0,
                                                  value=float(disp_spacing), step=step, key="grid_space")
                         if st.session_state.unit_system == "metric":
                             st.session_state.grid_spacing_mm = new_sp * 1000
@@ -658,8 +748,12 @@ if page == "Project Dashboard":
                         if st.button("Add Random Room"):
                             w = random.randint(100, 800)
                             h = random.randint(100, 500)
+                            w = round(w / 500) * 500
+                            h = round(h / 500) * 500
                             x = random.randint(0, 800 - w)
                             y = random.randint(0, 500 - h)
+                            x = round(x / 500) * 500
+                            y = round(y / 500) * 500
                             color_hex = f"#{random.randint(0,0xFFFFFF):06x}"
                             plan.append({
                                 "x": x, "y": y, "w": w, "h": h,
@@ -707,7 +801,7 @@ if page == "Project Dashboard":
                         st.markdown("**Nudge selected room**")
                         room_names = [r["name"] for r in plan]
                         nudge_room = st.selectbox("Select room", room_names, key="nudge_room_sel")
-                        nudge_step = st.number_input("Step (mm)", value=100, step=10, key="nudge_step")
+                        nudge_step = st.number_input("Step (mm)", value=500, step=500, key="nudge_step")
                         col_n1, col_n2, col_n3, col_n4 = st.columns(4)
                         idx = next(i for i, r in enumerate(plan) if r["name"] == nudge_room)
                         room = plan[idx]
@@ -848,7 +942,7 @@ if page == "Project Dashboard":
         st.caption("No activity yet.")
 
 # ======================
-# PAGE: STRUCTURAL ANALYSIS (Simplified)
+# PAGE: STRUCTURAL ANALYSIS
 # ======================
 elif page == "Structural Analysis":
     st.title("Structural Analysis Workstation")
