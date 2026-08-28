@@ -22,3 +22,13 @@ Drum/
 ├── requirements.txt        # Python packages
 ├── data/                   # User‑saved projects (auto‑created)
 └── README.md
+
+
+
+drum/
+├── streamlit_app.py
+├── main.py
+├── engineering.py
+├── eurocodes.py      ← This file was missing
+├── requirements.txt
+└── README.md
